@@ -6,6 +6,80 @@ release is what propagates a change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.1.0] — 2026-09-21
+
+Adds 22 Latin American presidents. The dataset goes from 38 leaders in 22
+countries to **60 leaders in 34 countries**, and from 327,900 to **440,004
+tweets**. No existing row changed.
+
+### Added
+
+- **22 presidents**, 112,104 tweets, from a separate collection
+  (`entiredatasetCH1.csv`) covering 2010–2023: Bachelet, Calderón, Cartes,
+  Chávez, Chinchilla, Correa, Cristina Fernández de Kirchner, Kuczynski, Lobo,
+  Macri, Maduro, Evo Morales, Jimmy Morales, Moreno, Peña Nieto, Pérez Molina,
+  Piñera, Rousseff, Santos, Solís, Temer and Varela.
+- **12 new countries**: Argentina, Bolivia, Chile, Colombia, Costa Rica,
+  Ecuador, Guatemala, Honduras, Panama, Paraguay, Peru, Venezuela.
+- **`leaders.populist`** — the `type_of_leader` coding carried in that source
+  file. It is the dataset author's own research classification, not an external
+  standard, and is null for the 38 leaders outside that batch.
+- `scripts/leaders_latam.py`, the registry for the new batch, and
+  `--base-tweets` / `--base-sentiment` options on `export_data.py` for
+  re-exporting one batch when the other batch's raw files aren't to hand.
+
+### Fixed
+
+- **Leader lookup broke on accented names in the R package.** Under a C locale
+  `tolower()` and `grepl()` could not handle a multi-byte name, and
+  `get_tweets("Chávez")` returned the *entire* table instead of erroring. Both
+  packages now fold case and accents at the codepoint level, so `"chavez"`,
+  `"Chavez"` and `"Chávez"` are equivalent in either language, and a filtered
+  query that cannot resolve its leader now errors instead of silently returning
+  everything. This bug could have silently corrupted any R analysis that
+  filtered on an accented name — which is every new leader in this release.
+- Parquet row groups are now set in `export_data.py` (25,000 rows) rather than
+  applied by hand, so browser range-request pruning survives a re-export.
+
+### Data quality notes
+
+- **Three date formats** appeared in the new source file and are parsed
+  explicitly: ISO-8601 with a time, bare `YYYY-MM-DD` (Bolsonaro's rows), and
+  R's numeric date serial (Macri's rows, days since 1970-01-01). Macri's 2,476
+  tweets therefore carry **date-only precision** — midnight UTC, not a real
+  time of day. The exporter refuses to write a row whose timestamp it cannot
+  parse.
+- **Bolsonaro and López Obrador appear in the new source file but were not
+  imported.** Both are already present from the original collection with wider
+  coverage and full timestamps (Bolsonaro 2010–2023 there versus 2019–2023
+  here). 6,666 of the new file's 9,417 Bolsonaro texts and 2,454 of its 2,668
+  AMLO texts were already in the dataset; importing them would have added
+  roughly 9,100 duplicates, because the date-only timestamps do not deduplicate
+  against the existing full ones.
+- **`id` is not a key in this batch either**: 95,966 distinct ids across
+  124,179 distinct tweets. Same treatment as before — `tweet_uid` is the key and
+  `source_id_reliable` is false for Calderón, Evo Morales, Moreno, Pérez Molina,
+  Piñera and Varela.
+- **11 duplicate rows** removed from 112,115, deduplicated on
+  `(leader_id, created_at, text)`.
+- **Quote counts are sparse for older tweets** — 0% for Chinchilla, 2–3% for
+  Lobo, Pérez Molina and Calderón — because quote tweets did not exist as a
+  counted metric for most of their terms. Treat a zero quote count before
+  roughly 2015 as "not measured", not "not quoted".
+- **`handle` is null for Jimmy Morales.** It could not be confirmed against a
+  live account, and his account has since been reported compromised, so it was
+  left empty rather than guessed. Every other handle was taken from the
+  collection's own timeline files or verified against the account.
+
+### Not included
+
+- Donald Trump. The available files carry retweets and favourites but **no
+  reply or quote counts at all**, so his engagement would not be comparable
+  with any other leader in the dataset. Pending a decision on how to represent
+  partial-metric leaders.
+- Iván Duque, Alberto Fernández and Juan Guaidó, who appear only in the
+  timeline files in this collection and have the same missing-metric problem.
+
 ## [v1.0.0] — 2026-09-20
 
 First public release.
@@ -53,4 +127,5 @@ First public release.
 - `tweet_type` and `in_reply_to_user_id` are frequently null — the collector did
   not populate them consistently.
 
+[v1.1.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.1.0
 [v1.0.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.0.0

@@ -1,7 +1,7 @@
 # Executive Social Media Database
 
-**327,900 tweets and their engagement metrics from 38 heads of government and
-state across 22 countries, January 2010 – June 2023.**
+**440,004 tweets and their engagement metrics from 60 heads of government and
+state across 34 countries, January 2010 – June 2023.**
 
 Three ways in, all reading the same versioned dataset:
 
@@ -22,24 +22,27 @@ Three tables, published as Parquet (canonical) and CSV on every tagged release.
 
 | table | rows | what it is |
 | --- | --- | --- |
-| `leaders` | 38 | one row per executive: identifiers, country, office, per-leader totals |
-| `tweets` | 327,900 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes |
+| `leaders` | 60 | one row per executive: identifiers, country, office, per-leader totals |
+| `tweets` | 440,004 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes |
 | `sentiment` | 142,623 | POS/NEU/NEG label and class probabilities, for the 11 leaders that were classified |
 
 `leaders` is the dimension table. `tweets` and `sentiment` join to it on
 `leader_id`; `sentiment` joins to `tweets` on `tweet_uid`.
 
-**Coverage is uneven by design.** The 21 leaders in the 2023 collection run
-start at 2018-01-01; the 17 from the 2022 run reach back as far as 2010 but stop
-at 2023-06-07. Fourteen leaders appear in both runs and their tweets are merged.
-`leaders.first_tweet` and `leaders.last_tweet` give each leader's real window —
-check them before comparing leaders across time.
+**Coverage is uneven by design.** The dataset was assembled from three
+collections. The 21 leaders in the 2023 run start at 2018-01-01; the 17 from the
+2022 run reach back as far as 2010 but stop at 2023-06-07; the 22 Latin American
+presidents added in v1.1.0 each span only their own time in office, from
+Chávez's 1,000 tweets ending in February 2013 to Maduro's 11,724 across
+2021–2022. `leaders.first_tweet` and `leaders.last_tweet` give each leader's
+real window — check them before comparing leaders across time, because a leader
+with fewer tweets usually had a shorter collected period, not a quieter one.
 
 ```python
 import leaders_tweets as lt
 
-lt.data_version()                                        # 'v1.0.0'
-lt.load_leaders()                                        # 38 rows
+lt.data_version()                                        # 'v1.1.0'
+lt.load_leaders()                                        # 60 rows
 lt.get_tweets("Modi", start="2022-01-01", end="2022-12-31")
 lt.get_sentiment("Trudeau")
 ```
@@ -54,7 +57,9 @@ get_sentiment("Trudeau")
 ```
 
 The two packages take the same arguments and return the same rows; `leader`
-accepts a `leader_id`, a full name, an X handle or a unique surname.
+accepts a `leader_id`, a full name, an X handle or a unique surname, and ignores
+case and accents — `"chavez"`, `"Chavez"` and `"Chávez"` all resolve to the same
+leader in both languages.
 
 ---
 
@@ -68,11 +73,18 @@ time**, not live: a 2010 tweet's likes reflect twelve years of accumulation, a
 2023 tweet's only days. Do not compare raw counts across very different tweet
 ages without accounting for that.
 
+The 22 Latin American presidents added in v1.1.0 come from a separate
+collection covering 2010–2023, assembled for research on populist communication.
+Its `type_of_leader` coding is preserved as the `populist` column on `leaders`
+— it is the dataset author's own research classification, not an external
+standard, and it is null for every leader outside that batch.
+
 Sentiment labels come from a `pysentimiento` classifier run over the tweet text
 for 11 leaders; the three probabilities sum to 1.
 
 Rows are deduplicated on `(leader_id, created_at, text)`, which removed 362 rows
-(0.09%) out of 407,427 raw rows.
+(0.09%) from the original 407,427 and 11 rows from the 112,115 in the Latin
+America batch.
 
 ### The tweet id problem
 
@@ -97,7 +109,8 @@ affected leaders those ids will fetch the wrong tweets.
 data/                  canonical tables (Parquet committed; CSV is release-only)
 scripts/
   export_data.py       raw CSVs -> canonical tables + schema.json
-  leaders.py           the 38-leader registry and file mapping
+  leaders.py           the original 38-leader registry and file mapping
+  leaders_latam.py     the 22 Latin American presidents added in v1.1.0
   make_manifest.py     writes the release pointer every client reads
   make_schema_md.py    renders schema.md from schema.json
   serve_site.py        local preview server with HTTP Range support
@@ -107,9 +120,9 @@ r-package/             leaderstweets
 .github/workflows/     Pages deployment
 ```
 
-`data/*.csv` is git-ignored: `tweets.csv` is 118 MB, past GitHub's hard 100 MB
+`data/*.csv` is git-ignored: `tweets.csv` is 157 MB, past GitHub's hard 100 MB
 per-file limit. The CSVs are attached to each release instead. The Parquet files
-(38 MB total) **are** committed, because the web app has to read them
+(49 MB total) **are** committed, because the web app has to read them
 same-origin — see below.
 
 ### Regenerating the dataset

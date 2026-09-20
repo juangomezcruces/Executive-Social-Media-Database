@@ -1,30 +1,30 @@
 {
   "dataset": "Executive Social Media Database",
-  "version": "v1.0.0",
-  "generated_at": "2026-09-20T18:12:47+00:00",
+  "version": "v1.1.0",
+  "generated_at": "2026-09-20T22:26:17+00:00",
   "repo": "https://github.com/juangomezcruces/Executive-Social-Media-Database",
   "schema": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/schema.json",
   "tables": {
     "leaders": {
       "parquet": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/leaders.parquet",
       "csv": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/leaders.csv",
-      "rows": 38,
-      "bytes": 14690,
-      "sha256": "ff6b77e188bdab31915a7b7ce8275cd8fbf03e51ebbe313e84eb3e5acea178d6"
+      "rows": 60,
+      "bytes": 17106,
+      "sha256": "6bdd3d3dd25d42227ea503ad637f62896240b388bb5468246243fb99d39d3104"
     },
     "tweets": {
       "parquet": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/tweets.parquet",
       "csv": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/tweets.csv",
-      "rows": 327900,
-      "bytes": 35099319,
-      "sha256": "adc616a86af627457b8f6a81c9b444d078231d9ebb75c7ef3eb0d55ea958f3b6"
+      "rows": 440004,
+      "bytes": 46198490,
+      "sha256": "cd9a9cc5ee5d8c2f1a9f49539a2f5c42d8e4ab24114ba99484da7ed82ef534e3"
     },
     "sentiment": {
       "parquet": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/sentiment.parquet",
       "csv": "https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/latest/download/sentiment.csv",
       "rows": 142623,
-      "bytes": 3053826,
-      "sha256": "600ecbbce8d38d0580b6bd60f87ee7da458aa393d6d7173a178f784ba820dfd7"
+      "bytes": 3181566,
+      "sha256": "d372225db72b7faf3d0653532882711676de479e1e23c51f93b7cc7cad550e82"
     }
   }
 }

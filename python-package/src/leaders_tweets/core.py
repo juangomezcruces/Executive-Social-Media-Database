@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -128,21 +129,39 @@ def load_leaders() -> pd.DataFrame:
     return _table("leaders").copy()
 
 
+def _fold(value: object) -> str:
+    """Lowercase and strip accents, so 'chavez' matches 'Hugo Chávez'.
+
+    Many leaders in the dataset have accented names. Requiring the exact
+    accents would make the obvious call fail, so both sides of every
+    comparison are folded. The R package folds identically.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(value))
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return stripped.strip().lower()
+
+
 def _resolve_leader(leader: str) -> str:
     """Map a leader_id, full name or handle to a leader_id.
 
-    Matching is case-insensitive and also accepts a unique surname fragment, so
-    ``"modi"``, ``"Narendra Modi"`` and ``"narendramodi"`` all resolve.
+    Matching ignores case and accents and also accepts a unique surname
+    fragment, so ``"modi"``, ``"Narendra Modi"`` and ``"narendramodi"`` all
+    resolve, as do ``"chavez"`` and ``"Chávez"``.
     """
     leaders = _table("leaders")
-    needle = leader.strip().lower()
+    needle = _fold(leader)
 
     for column in ("leader_id", "handle", "name"):
-        hit = leaders[leaders[column].str.lower() == needle]
+        folded = leaders[column].map(_fold, na_action="ignore")
+        hit = leaders[folded == needle]
         if len(hit) == 1:
             return hit.iloc[0]["leader_id"]
 
-    partial = leaders[leaders["name"].str.lower().str.contains(needle, regex=False)]
+    partial = leaders[
+        leaders["name"].map(_fold, na_action="ignore").str.contains(
+            needle, regex=False, na=False
+        )
+    ]
     if len(partial) == 1:
         return partial.iloc[0]["leader_id"]
     if len(partial) > 1:

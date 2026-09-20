@@ -1,11 +1,11 @@
 {
   "dataset": "Executive Social Media Database",
-  "version": "v1.0.0",
-  "generated_from": "/sessions/rcw-01btpcf6dgz2jhkwztlfgrjv/mnt/APPROVAL VS MACHINE LEARNING",
+  "version": "v1.1.0",
+  "generated_from": "/tmp/latam-src",
   "primary_key_note": "tweet_uid is the primary key. source_tweet_id is the raw X id and is not unique in 12 of the 52 collection files; check source_id_reliable before using it to rehydrate.",
   "tables": {
     "leaders": {
-      "rows": 38,
+      "rows": 60,
       "columns": [
         {
           "name": "leader_id",
@@ -44,12 +44,12 @@
         },
         {
           "name": "first_tweet",
-          "type": "datetime64[us, UTC]",
+          "type": "datetime64[ns, UTC]",
           "description": "Timestamp of the earliest tweet collected (UTC)."
         },
         {
           "name": "last_tweet",
-          "type": "datetime64[us, UTC]",
+          "type": "datetime64[ns, UTC]",
           "description": "Timestamp of the latest tweet collected (UTC)."
         },
         {
@@ -88,6 +88,11 @@
           "description": "True when this leader appears in the sentiment table."
         },
         {
+          "name": "populist",
+          "type": "boolean",
+          "description": "Populist classification carried in the Latin America source file; the dataset author's own research coding, not an external standard. Null for leaders outside that batch."
+        },
+        {
           "name": "source_files",
           "type": "str",
           "description": "Semicolon-separated raw collection files this leader was built from."
@@ -95,7 +100,7 @@
       ]
     },
     "tweets": {
-      "rows": 327900,
+      "rows": 440004,
       "columns": [
         {
           "name": "tweet_uid",
@@ -119,7 +124,7 @@
         },
         {
           "name": "created_at",
-          "type": "datetime64[us, UTC]",
+          "type": "object",
           "description": "Tweet timestamp, UTC."
         },
         {

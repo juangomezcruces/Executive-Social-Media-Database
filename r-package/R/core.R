@@ -145,7 +145,8 @@ clear_cache <- function() {
       total_quotes = readr::col_double(),
       mean_engagement = readr::col_double(),
       source_id_reliable = readr::col_logical(),
-      has_sentiment = readr::col_logical()
+      has_sentiment = readr::col_logical(),
+      populist = readr::col_logical()
     ),
     list()
   )
@@ -190,18 +191,57 @@ load_leaders <- function() {
   .table("leaders")
 }
 
+#' Accented Latin-1 letters and their ASCII equivalents, as codepoints
+#'
+#' Deliberately integers rather than "\\u00e1" = "a" string literals: under a C
+#' locale R cannot represent those escapes natively and renders them as the
+#' literal text "<c3><a1>", which silently corrupts the lookup table. Integer
+#' codepoints mean the same thing in every locale.
+#' @noRd
+.ACCENT_FROM <- c(224:229, 231L, 232:235, 236:239, 241L, 242:246, 249:252, 253L, 255L)
+#' @noRd
+.ACCENT_TO <- c(rep(97L, 6), 99L, rep(101L, 4), rep(105L, 4), 110L,
+                rep(111L, 5), rep(117L, 4), 121L, 121L)
+
+#' Lowercase and strip accents, independently of locale
+#'
+#' Done at the codepoint level on purpose. Under a C locale neither `tolower()`
+#' nor `iconv(..., "ASCII//TRANSLIT")` touches multi-byte characters, and
+#' `grepl()` then fails outright with "regular expression is invalid UTF-8" --
+#' so matching a name like "Hugo Chavez" would break depending on the machine's
+#' locale. This makes `"chavez"`, `"Chavez"` and `"Chávez"` equivalent
+#' everywhere, matching the Python package.
+#' @noRd
+.fold <- function(x) {
+  x <- enc2utf8(as.character(x))
+  out <- vapply(x, function(s) {
+    if (is.na(s)) return(NA_character_)
+    cp <- tryCatch(utf8ToInt(s), error = function(e) NA_integer_)
+    if (length(cp) == 0L || anyNA(cp)) return(trimws(s))
+    ascii_upper <- cp >= 65L & cp <= 90L
+    cp[ascii_upper] <- cp[ascii_upper] + 32L
+    latin_upper <- cp >= 192L & cp <= 222L & cp != 215L  # 215 is the times sign
+    cp[latin_upper] <- cp[latin_upper] + 32L
+    hit <- match(cp, .ACCENT_FROM)
+    cp[!is.na(hit)] <- .ACCENT_TO[hit[!is.na(hit)]]
+    intToUtf8(cp)
+  }, character(1), USE.NAMES = FALSE)
+  trimws(out)
+}
+
 #' Resolve a leader_id, name or handle to a leader_id
 #' @noRd
 .resolve_leader <- function(leader) {
   leaders <- .table("leaders")
-  needle <- tolower(trimws(leader))
+  needle <- .fold(leader)
 
   for (column in c("leader_id", "handle", "name")) {
-    hit <- leaders$leader_id[tolower(leaders[[column]]) == needle]
+    hit <- leaders$leader_id[!is.na(leaders[[column]]) &
+                               .fold(leaders[[column]]) == needle]
     if (length(hit) == 1L) return(hit)
   }
 
-  partial <- leaders[grepl(needle, tolower(leaders$name), fixed = TRUE), ]
+  partial <- leaders[grepl(needle, .fold(leaders$name), fixed = TRUE), ]
   if (nrow(partial) == 1L) return(partial$leader_id)
   if (nrow(partial) > 1L) {
     stop(sprintf("'%s' is ambiguous; it matches: %s", leader,
@@ -216,7 +256,13 @@ load_leaders <- function() {
 #' @noRd
 .filter_rows <- function(data, leader, start, end) {
   if (!is.null(leader)) {
-    data <- data[data$leader_id == .resolve_leader(leader), , drop = FALSE]
+    resolved <- .resolve_leader(leader)
+    # A resolver that somehow yields nothing must not silently fall through to
+    # "no filter" and hand back the whole table.
+    if (length(resolved) != 1L || is.na(resolved)) {
+      stop(sprintf("could not resolve leader '%s'", leader), call. = FALSE)
+    }
+    data <- data[!is.na(data$leader_id) & data$leader_id == resolved, , drop = FALSE]
   }
   if (!is.null(start)) {
     from <- as.POSIXct(paste0(start, " 00:00:00"), tz = "UTC")

@@ -8,31 +8,36 @@ fixture_cache <- function() {
   dir.create(file.path(path, version), recursive = TRUE, showWarnings = FALSE)
 
   leaders <- tibble::tibble(
-    leader_id = c("modi", "trudeau", "may"),
-    name = c("Narendra Modi", "Justin Trudeau", "Theresa May"),
-    handle = c("narendramodi", "JustinTrudeau", "theresa_may"),
-    country = c("India", "Canada", "United Kingdom"),
-    country_iso3 = c("IND", "CAN", "GBR"),
+    leader_id = c("modi", "trudeau", "may", "chavez", "morales_jimmy"),
+    name = c("Narendra Modi", "Justin Trudeau", "Theresa May",
+             intToUtf8(c(72,117,103,111,32,67,104,225,118,101,122)),  # Hugo Chavez, accented
+             "Jimmy Morales"),
+    # handle is NA for leaders whose account could not be verified.
+    handle = c("narendramodi", "JustinTrudeau", "theresa_may",
+               "chavezcandanga", NA_character_),
+    country = c("India", "Canada", "United Kingdom", "Venezuela", "Guatemala"),
+    country_iso3 = c("IND", "CAN", "GBR", "VEN", "GTM"),
     office = "Prime Minister",
-    n_tweets = c(3L, 1L, 0L),
+    n_tweets = c(3L, 1L, 0L, 1L, 1L),
     first_tweet = as.POSIXct("2022-01-01", tz = "UTC"),
     last_tweet = as.POSIXct("2023-01-02", tz = "UTC"),
-    total_retweets = c(1, 1, 0), total_replies = c(1, 1, 0),
-    total_likes = c(1, 1, 0), total_quotes = c(1, 1, 0),
-    mean_engagement = c(20, 40, 0),
-    source_id_reliable = c(FALSE, TRUE, FALSE),
-    has_sentiment = c(TRUE, TRUE, FALSE),
+    total_retweets = c(1, 1, 0, 1, 1), total_replies = c(1, 1, 0, 1, 1),
+    total_likes = c(1, 1, 0, 1, 1), total_quotes = c(1, 1, 0, 1, 1),
+    mean_engagement = c(20, 40, 0, 50, 60),
+    source_id_reliable = c(FALSE, TRUE, FALSE, TRUE, TRUE),
+    has_sentiment = c(TRUE, TRUE, FALSE, FALSE, FALSE),
     source_files = "x.csv"
   )
   tweets <- tibble::tibble(
-    tweet_uid = c("a1", "a2", "a3", "b1"),
-    leader_id = c("modi", "modi", "modi", "trudeau"),
-    country = c("India", "India", "India", "Canada"),
+    tweet_uid = c("a1", "a2", "a3", "b1", "c1", "d1"),
+    leader_id = c("modi", "modi", "modi", "trudeau", "chavez", "morales_jimmy"),
+    country = c("India", "India", "India", "Canada", "Venezuela", "Guatemala"),
     created_at = as.POSIXct(
       c("2022-03-01 10:00:00", "2022-06-15 10:00:00",
-        "2023-01-02 10:00:00", "2022-06-15 12:00:00"), tz = "UTC"),
-    text = c("one", "two", "three", "four"),
-    engagement = c(10L, 20L, 30L, 40L)
+        "2023-01-02 10:00:00", "2022-06-15 12:00:00",
+        "2012-06-15 12:00:00", "2016-06-15 12:00:00"), tz = "UTC"),
+    text = c("one", "two", "three", "four", "cinco", "seis"),
+    engagement = c(10L, 20L, 30L, 40L, 50L, 60L)
   )
   tweets$date <- as.Date(tweets$created_at)
   sentiment <- tibble::tibble(
@@ -94,13 +99,13 @@ test_that("load_leaders returns every leader as a tibble", {
   with_fixtures({
     leaders <- load_leaders()
     expect_s3_class(leaders, "tbl_df")
-    expect_equal(nrow(leaders), 3L)
-    expect_setequal(leaders$leader_id, c("modi", "trudeau", "may"))
+    expect_equal(nrow(leaders), 5L)
+    expect_true(all(c("modi", "trudeau", "may") %in% leaders$leader_id))
   })
 })
 
 test_that("get_tweets with no arguments returns everything", {
-  with_fixtures(expect_equal(nrow(get_tweets()), 4L))
+  with_fixtures(expect_equal(nrow(get_tweets()), 6L))
 })
 
 test_that("get_tweets filters by leader_id", {
@@ -166,4 +171,29 @@ test_that("a stale manifest still resolves when offline", {
     },
     mock_download = FALSE
   )
+})
+
+test_that("leader matching ignores accents and locale", {
+  # Under a C locale, tolower()/grepl() on a multi-byte name used to fail
+  # outright and get_tweets() handed back the entire table. Both packages now
+  # fold accents at the codepoint level and must agree.
+  with_fixtures({
+    accented_lower <- intToUtf8(c(72,117,103,111,32,67,104,225,118,101,122))
+    accented_upper <- intToUtf8(c(67,72,193,86,69,90))
+    for (alias in c("chavez", "Chavez", accented_upper, accented_lower,
+                    "Hugo Chavez", "chavezcandanga")) {
+      expect_equal(get_tweets(alias)$tweet_uid, "c1", info = alias)
+    }
+  })
+})
+
+test_that("a leader with no handle still resolves", {
+  with_fixtures(expect_equal(get_tweets("Jimmy Morales")$tweet_uid, "d1"))
+})
+
+test_that("a filtered query never falls through to the whole table", {
+  with_fixtures({
+    expect_lt(nrow(get_tweets("modi")), nrow(get_tweets()))
+    expect_error(get_tweets("Winston Churchill"))
+  })
 })

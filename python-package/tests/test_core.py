@@ -25,6 +25,13 @@ LEADERS = pd.DataFrame([
     dict(leader_id="may", name="Theresa May", handle="theresa_may",
          country="United Kingdom", country_iso3="GBR", office="Prime Minister",
          n_tweets=0, source_id_reliable=False, has_sentiment=False),
+    dict(leader_id="chavez", name="Hugo Ch\u00e1vez", handle="chavezcandanga",
+         country="Venezuela", country_iso3="VEN", office="President",
+         n_tweets=1, source_id_reliable=True, has_sentiment=False),
+    # handle deliberately null: not every account could be verified.
+    dict(leader_id="morales_jimmy", name="Jimmy Morales", handle=None,
+         country="Guatemala", country_iso3="GTM", office="President",
+         n_tweets=1, source_id_reliable=True, has_sentiment=False),
 ])
 
 TWEETS = pd.DataFrame([
@@ -40,6 +47,12 @@ TWEETS = pd.DataFrame([
     dict(tweet_uid="b1", leader_id="trudeau", country="Canada",
          created_at=pd.Timestamp("2022-06-15T12:00:00Z"), text="four",
          engagement=40),
+    dict(tweet_uid="c1", leader_id="chavez", country="Venezuela",
+         created_at=pd.Timestamp("2012-06-15T12:00:00Z"), text="cinco",
+         engagement=50),
+    dict(tweet_uid="d1", leader_id="morales_jimmy", country="Guatemala",
+         created_at=pd.Timestamp("2016-06-15T12:00:00Z"), text="seis",
+         engagement=60),
 ])
 TWEETS["date"] = TWEETS["created_at"].dt.date
 
@@ -92,8 +105,8 @@ def test_data_version_reads_the_manifest():
 
 def test_load_leaders_returns_every_leader():
     leaders = lt.load_leaders()
-    assert len(leaders) == 3
-    assert set(leaders["leader_id"]) == {"modi", "trudeau", "may"}
+    assert len(leaders) == 5
+    assert {"modi", "trudeau", "may"} <= set(leaders["leader_id"])
 
 
 def test_load_leaders_returns_a_copy():
@@ -103,7 +116,7 @@ def test_load_leaders_returns_a_copy():
 
 
 def test_get_tweets_unfiltered_returns_everything():
-    assert len(lt.get_tweets()) == 4
+    assert len(lt.get_tweets()) == 6
 
 
 def test_get_tweets_filters_by_leader_id():
@@ -113,6 +126,19 @@ def test_get_tweets_filters_by_leader_id():
 @pytest.mark.parametrize("alias", ["modi", "MODI", "Narendra Modi", "narendramodi"])
 def test_leader_accepts_id_name_and_handle(alias):
     assert len(lt.get_tweets(alias)) == 3
+
+
+@pytest.mark.parametrize("alias", ["chavez", "Chavez", "CHÁVEZ", "Hugo Chávez",
+                                   "Hugo Chavez", "chavezcandanga"])
+def test_leader_matching_ignores_accents(alias):
+    # Many leaders have accented names; requiring exact accents would make the
+    # obvious call fail, and the R package must agree.
+    assert set(lt.get_tweets(alias)["tweet_uid"]) == {"c1"}
+
+
+def test_a_leader_with_no_handle_still_resolves():
+    # handle is null for leaders whose account could not be verified.
+    assert set(lt.get_tweets("Jimmy Morales")["tweet_uid"]) == {"d1"}
 
 
 def test_get_tweets_end_bound_is_inclusive_of_the_whole_day():

@@ -22,11 +22,11 @@ Rows are therefore keyed on **`tweet_uid`**, a BLAKE2b-64 digest of
 for that leader -- check it before using ids to rehydrate against the X API.
 
 
-*Generated from `data/schema.json` for release `v1.0.0`.*
+*Generated from `data/schema.json` for release `v1.1.0`.*
 
 ## `leaders`
 
-38 rows.
+60 rows.
 
 | column | type | description |
 | --- | --- | --- |
@@ -37,8 +37,8 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `country_iso3` | `str` | ISO 3166-1 alpha-3 country code. |
 | `office` | `str` | Title held during the collection window. |
 | `n_tweets` | `int64` | Number of distinct tweets for this leader in the tweets table. |
-| `first_tweet` | `datetime64[us, UTC]` | Timestamp of the earliest tweet collected (UTC). |
-| `last_tweet` | `datetime64[us, UTC]` | Timestamp of the latest tweet collected (UTC). |
+| `first_tweet` | `datetime64[ns, UTC]` | Timestamp of the earliest tweet collected (UTC). |
+| `last_tweet` | `datetime64[ns, UTC]` | Timestamp of the latest tweet collected (UTC). |
 | `total_retweets` | `int64` | Sum of retweet_count over all of this leader's tweets. |
 | `total_replies` | `int64` | Sum of reply_count over all of this leader's tweets. |
 | `total_likes` | `int64` | Sum of like_count over all of this leader's tweets. |
@@ -46,11 +46,12 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `mean_engagement` | `float64` | Mean of (retweets + replies + likes + quotes) per tweet. |
 | `source_id_reliable` | `bool` | False when the raw collection file reused tweet ids across distinct tweets; see source_tweet_id. |
 | `has_sentiment` | `bool` | True when this leader appears in the sentiment table. |
+| `populist` | `boolean` | Populist classification carried in the Latin America source file; the dataset author's own research coding, not an external standard. Null for leaders outside that batch. |
 | `source_files` | `str` | Semicolon-separated raw collection files this leader was built from. |
 
 ## `tweets`
 
-327,900 rows.
+440,004 rows.
 
 | column | type | description |
 | --- | --- | --- |
@@ -58,7 +59,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `leader_id` | `string` | Foreign key into leaders. |
 | `country` | `string` | Denormalised from leaders for convenient filtering. |
 | `country_iso3` | `string` | Denormalised from leaders. |
-| `created_at` | `datetime64[us, UTC]` | Tweet timestamp, UTC. |
+| `created_at` | `object` | Tweet timestamp, UTC. |
 | `date` | `object` | Calendar date of created_at, UTC. Convenience column for daily aggregation. |
 | `lang` | `string` | Language code assigned by X at collection time. |
 | `text` | `string` | Tweet text as collected. |

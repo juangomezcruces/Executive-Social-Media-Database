@@ -41,6 +41,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from leaders import LEADERS, SENTIMENT_FILES  # noqa: E402
+from leaders_latam import LATAM_LEADERS, SOURCE_FILE as LATAM_FILE  # noqa: E402
 
 RAW_COLUMNS = [
     "text", "id", "lang", "created_at", "retweet_count", "reply_count",
@@ -129,6 +130,93 @@ def build_tweets(source: Path) -> pd.DataFrame:
     return tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
 
 
+def _parse_mixed_dates(raw: pd.Series) -> pd.Series:
+    """Parse the three date formats found in the Latin America source file.
+
+    The file was assembled from several exports and carries ISO-8601 with a
+    time, bare ``YYYY-MM-DD`` (Bolsonaro's rows), and R's numeric date serial
+    -- days since 1970-01-01 (Macri's rows). Parsing them with one format
+    silently yields NaT for two of the three, so each is handled explicitly and
+    the result is asserted complete.
+    """
+    raw = raw.fillna("")
+    iso = raw.str.match(r"^\d{4}-\d{2}-\d{2}T")
+    date_only = raw.str.match(r"^\d{4}-\d{2}-\d{2}$")
+    serial = raw.str.match(r"^\d+$")
+
+    out = pd.Series(pd.NaT, index=raw.index, dtype="datetime64[ns, UTC]")
+    out[iso] = pd.to_datetime(raw[iso], utc=True, errors="coerce", format="ISO8601")
+    out[date_only] = pd.to_datetime(raw[date_only], utc=True, errors="coerce",
+                                    format="%Y-%m-%d")
+    out[serial] = pd.to_datetime(pd.to_numeric(raw[serial]), unit="D",
+                                 origin="1970-01-01", utc=True, errors="coerce")
+    unparsed = out.isna().sum()
+    if unparsed:
+        raise AssertionError(
+            f"{unparsed} timestamps in {LATAM_FILE} did not match any known "
+            "format; refusing to publish rows with missing dates."
+        )
+    return out
+
+
+def build_latam(source: Path) -> pd.DataFrame:
+    """Normalise the Latin America source file into the tweets schema.
+
+    Returns an empty frame when the file is absent, so the original export
+    still runs for anyone without it.
+    """
+    path = source / LATAM_FILE
+    if not path.exists():
+        print(f"  ! {LATAM_FILE} not found, skipping the Latin America batch",
+              file=sys.stderr)
+        return pd.DataFrame()
+
+    raw = pd.read_csv(path, dtype=str, low_memory=False, encoding="utf-8",
+                      encoding_errors="replace")
+    frames = []
+    for leader in LATAM_LEADERS:
+        df = raw[raw["short_name"] == leader["short_name"]].copy()
+        if df.empty:
+            raise ValueError(f"{leader['leader_id']}: no rows for "
+                             f"short_name={leader['short_name']!r}")
+        df["text"] = df["text"].fillna("")
+        df["leader_id"] = leader["leader_id"]
+        df["country"] = leader["country"]
+        df["country_iso3"] = leader["iso3"]
+
+        # Same test as the main pipeline: is id 1:1 with distinct tweets?
+        distinct = df.drop_duplicates(["created_at", "text"]).shape[0]
+        df["source_id_reliable"] = df["id"].nunique() == distinct
+
+        df = df.drop_duplicates(["created_at", "text"], keep="first")
+        frames.append(df)
+
+    tweets = pd.concat(frames, ignore_index=True)
+    tweets["source_file"] = LATAM_FILE
+    tweets["tweet_uid"] = [
+        _uid(l, c, t) for l, c, t in
+        zip(tweets["leader_id"], tweets["created_at"], tweets["text"])
+    ]
+
+    ts = _parse_mixed_dates(tweets["created_at"])
+    tweets["created_at"] = ts
+    tweets["date"] = ts.dt.date
+    for col in COUNT_COLUMNS:
+        tweets[col] = pd.to_numeric(tweets[col], errors="coerce").fillna(0).astype("int64")
+    tweets["engagement"] = tweets[COUNT_COLUMNS].sum(axis=1)
+    tweets["possibly_sensitive"] = _to_bool(tweets["possibly_sensitive"])
+    tweets = tweets.rename(columns={"id": "source_tweet_id", "type": "tweet_type"})
+    for col in ("lang", "tweet_type", "in_reply_to_user_id"):
+        tweets[col] = tweets[col].replace({"NA": None}).astype("string")
+
+    return tweets[[
+        "tweet_uid", "leader_id", "country", "country_iso3", "created_at", "date",
+        "lang", "text", *COUNT_COLUMNS, "engagement", "possibly_sensitive",
+        "in_reply_to_user_id", "tweet_type", "source_tweet_id",
+        "source_id_reliable", "source_file",
+    ]]
+
+
 def build_sentiment(source: Path, tweets: pd.DataFrame) -> pd.DataFrame:
     uid_by_key = dict(
         zip(
@@ -189,9 +277,15 @@ def build_leaders(tweets: pd.DataFrame, sentiment: pd.DataFrame) -> pd.DataFrame
     )
     with_sent = set(sentiment["leader_id"].unique())
 
+    registry = [dict(l, source_files=";".join(l["files"]), populist=None)
+                for l in LEADERS]
+    registry += [dict(l, source_files=LATAM_FILE) for l in LATAM_LEADERS]
+
     rows = []
-    for leader in LEADERS:
+    for leader in registry:
         lid = leader["leader_id"]
+        if lid not in agg.index:
+            continue  # source file absent for this batch
         a = agg.loc[lid]
         rows.append({
             "leader_id": lid,
@@ -212,9 +306,12 @@ def build_leaders(tweets: pd.DataFrame, sentiment: pd.DataFrame) -> pd.DataFrame
                          "total_likes", "total_quotes"]].sum()) / int(a["n_tweets"]), 2),
             "source_id_reliable": bool(a["source_id_reliable"]),
             "has_sentiment": lid in with_sent,
-            "source_files": ";".join(leader["files"]),
+            "populist": leader["populist"],
+            "source_files": leader["source_files"],
         })
-    return pd.DataFrame(rows).sort_values("leader_id").reset_index(drop=True)
+    out = pd.DataFrame(rows)
+    out["populist"] = out["populist"].astype("boolean")
+    return out.sort_values("leader_id").reset_index(drop=True)
 
 
 SCHEMA_DOC = {
@@ -235,6 +332,7 @@ SCHEMA_DOC = {
         "mean_engagement": "Mean of (retweets + replies + likes + quotes) per tweet.",
         "source_id_reliable": "False when the raw collection file reused tweet ids across distinct tweets; see source_tweet_id.",
         "has_sentiment": "True when this leader appears in the sentiment table.",
+        "populist": "Populist classification carried in the Latin America source file; the dataset author's own research coding, not an external standard. Null for leaders outside that batch.",
         "source_files": "Semicolon-separated raw collection files this leader was built from.",
     },
     "tweets": {
@@ -284,7 +382,10 @@ def write_table(df: pd.DataFrame, out: Path, name: str, parquet: bool) -> dict:
     written = {"csv": csv_path.stat().st_size}
     if parquet:
         pq_path = out / f"{name}.parquet"
-        df.to_parquet(pq_path, index=False, compression="zstd")
+        # Small row groups so DuckDB-Wasm can prune by range request in the
+        # browser instead of pulling the whole file for a filtered query.
+        df.to_parquet(pq_path, index=False, compression="zstd",
+                      row_group_size=25_000)
         written["parquet"] = pq_path.stat().st_size
     print(f"  {name:10s} {len(df):>7,} rows  " +
           "  ".join(f"{k} {v/1e6:.1f}MB" for k, v in written.items()))
@@ -305,14 +406,39 @@ def main() -> None:
     ap.add_argument("--version", default="v1.0.0", help="release tag this export belongs to")
     ap.add_argument("--no-parquet", action="store_true",
                     help="skip Parquet (use when pyarrow is unavailable)")
+    ap.add_argument("--base-sentiment", type=Path, default=None,
+                    help="reuse an already-exported sentiment.parquet instead of "
+                         "rebuilding it from the withSentiment CSVs.")
+    ap.add_argument("--base-tweets", type=Path, default=None,
+                    help="reuse an already-exported tweets.parquet for the original "
+                         "collection instead of rebuilding it from the raw CSVs. Use "
+                         "when only the newer source files are to hand; the result is "
+                         "identical because that batch is deterministic.")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     parquet = not args.no_parquet
 
-    print("building tweets ...")
-    tweets = build_tweets(args.source)
-    print("building sentiment ...")
-    sentiment = build_sentiment(args.source, tweets)
+    if args.base_tweets:
+        print(f"reusing {args.base_tweets} for the original collection ...")
+        tweets = pd.read_parquet(args.base_tweets)
+    else:
+        print("building tweets ...")
+        tweets = build_tweets(args.source)
+    print("building the Latin America batch ...")
+    latam = build_latam(args.source)
+    if not latam.empty:
+        overlap = set(tweets["tweet_uid"]) & set(latam["tweet_uid"])
+        if overlap:
+            raise AssertionError(f"{len(overlap)} tweet_uid collisions between batches")
+        print(f"  {len(latam):,} tweets across {latam.leader_id.nunique()} leaders")
+        tweets = pd.concat([tweets, latam], ignore_index=True)
+        tweets = tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
+    if args.base_sentiment:
+        print(f"reusing {args.base_sentiment} for sentiment ...")
+        sentiment = pd.read_parquet(args.base_sentiment)
+    else:
+        print("building sentiment ...")
+        sentiment = build_sentiment(args.source, tweets)
     print("building leaders ...")
     leaders = build_leaders(tweets, sentiment)
 
