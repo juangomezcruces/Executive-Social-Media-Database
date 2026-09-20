@@ -1,0 +1,155 @@
+"""Registry of the 38 executives in the Executive Social Media Database.
+
+Each entry maps one leader to the raw collection file(s) that contain their
+tweets.  Fourteen leaders were collected twice -- once in the 2022 pull, which
+used the account handle as the file name, and once in the 2023 pull, which used
+the leader's surname in upper case and started from 2018-01-01.  Both pulls are
+unioned and deduplicated on tweet content.
+
+Fields
+------
+leader_id  stable snake_case key used as the join key across every table
+name       full name, as commonly rendered in English
+handle     X/Twitter account the tweets were collected from (without the @)
+country    country name in English
+iso3       ISO 3166-1 alpha-3 country code
+office     title held while the tweets were collected
+files      raw CSV file names, in collection order
+"""
+
+LEADERS = [
+    # --- leaders present in the 2023 (upper-case) pull -----------------------
+    dict(leader_id="albanese",   name="Anthony Albanese",            handle="AlboMP",
+         country="Australia",     iso3="AUS", office="Prime Minister",
+         files=["tweetsALBANESE.csv", "tweetsAlboMP.csv"]),
+    dict(leader_id="lopez_obrador", name="Andrés Manuel López Obrador", handle="lopezobrador_",
+         country="Mexico",        iso3="MEX", office="President",
+         files=["tweetsAMLO.csv"]),
+    dict(leader_id="berset",     name="Alain Berset",                handle="alain_berset",
+         country="Switzerland",   iso3="CHE", office="President of the Confederation",
+         files=["tweetsBERSET.csv", "tweetsalain_berset.csv"]),
+    dict(leader_id="biden",      name="Joe Biden",                   handle="JoeBiden",
+         country="United States", iso3="USA", office="President",
+         files=["tweetsBiden.csv", "tweetsJoeBiden.csv"]),
+    dict(leader_id="de_croo",    name="Alexander De Croo",           handle="alexanderdecroo",
+         country="Belgium",       iso3="BEL", office="Prime Minister",
+         files=["tweetsDECROO.csv", "tweetsalexanderdecroo.csv"]),
+    dict(leader_id="fiala",      name="Petr Fiala",                  handle="P_Fiala",
+         country="Czech Republic", iso3="CZE", office="Prime Minister",
+         files=["tweetsFIALA.csv", "tweetsP_Fiala.csv"]),
+    dict(leader_id="gahr_store", name="Jonas Gahr Støre",       handle="jonasgahrstore",
+         country="Norway",        iso3="NOR", office="Prime Minister",
+         files=["tweetsGAHRSTORE.csv", "tweetsjonasgahrstore.csv"]),
+    dict(leader_id="kishida",    name="Fumio Kishida",               handle="kishida230",
+         country="Japan",         iso3="JPN", office="Prime Minister",
+         files=["tweetsKishida.csv"]),
+    dict(leader_id="lula",       name="Luiz Inácio Lula da Silva", handle="LulaOficial",
+         country="Brazil",        iso3="BRA", office="President",
+         files=["tweetsLULA.csv", "tweetsLulaOficial.csv"]),
+    dict(leader_id="macron",     name="Emmanuel Macron",             handle="EmmanuelMacron",
+         country="France",        iso3="FRA", office="President",
+         files=["tweetsMacron.csv"]),
+    dict(leader_id="meloni",     name="Giorgia Meloni",              handle="GiorgiaMeloni",
+         country="Italy",         iso3="ITA", office="Prime Minister",
+         files=["tweetsMELONI.csv", "tweetsGiorgiaMeloni.csv"]),
+    dict(leader_id="modi",       name="Narendra Modi",               handle="narendramodi",
+         country="India",         iso3="IND", office="Prime Minister",
+         files=["tweetsModi.csv"]),
+    dict(leader_id="morawiecki", name="Mateusz Morawiecki",          handle="MorawieckiM",
+         country="Poland",        iso3="POL", office="Prime Minister",
+         files=["tweetsMORAWIECKI.csv", "tweetsMorawieckiM.csv"]),
+    dict(leader_id="nehammer",   name="Karl Nehammer",               handle="karlnehammer",
+         country="Austria",       iso3="AUT", office="Chancellor",
+         files=["tweetsNEHAMMER.csv", "tweetkarlnehammer.csv"]),
+    dict(leader_id="rutte",      name="Mark Rutte",                  handle="MinPres",
+         country="Netherlands",   iso3="NLD", office="Prime Minister",
+         files=["tweetsRUTTE.csv", "tweetsMinPres.csv"]),
+    dict(leader_id="sanchez",    name="Pedro Sánchez",          handle="sanchezcastejon",
+         country="Spain",         iso3="ESP", office="Prime Minister",
+         files=["tweetsSanchez.csv"]),
+    dict(leader_id="scholz",     name="Olaf Scholz",                 handle="OlafScholz",
+         country="Germany",       iso3="DEU", office="Chancellor",
+         files=["tweetsSCHOLZ.csv", "tweetsOlafScholz.csv"]),
+    dict(leader_id="yoon",       name="Yoon Suk-yeol",               handle="sukyeol_yoon",
+         country="South Korea",   iso3="KOR", office="President",
+         files=["tweetsSEOKYOUL.csv"]),
+    dict(leader_id="sunak",      name="Rishi Sunak",                 handle="RishiSunak",
+         country="United Kingdom", iso3="GBR", office="Prime Minister",
+         files=["tweetsSUNAK.csv", "tweetsRishiSunak.csv"]),
+    dict(leader_id="trudeau",    name="Justin Trudeau",              handle="JustinTrudeau",
+         country="Canada",        iso3="CAN", office="Prime Minister",
+         files=["tweetsTrudeau.csv"]),
+    dict(leader_id="varadkar",   name="Leo Varadkar",                handle="LeoVaradkar",
+         country="Ireland",       iso3="IRL", office="Taoiseach",
+         files=["tweetsVARADKAR.csv", "tweetsLeoVaradkar.csv"]),
+
+    # --- leaders present only in the 2022 (handle-named) pull ----------------
+    dict(leader_id="abe",        name="Shinzo Abe",                  handle="AbeShinzo",
+         country="Japan",         iso3="JPN", office="Prime Minister",
+         files=["tweetsAbeShinzo.csv"]),
+    dict(leader_id="babis",      name="Andrej Babiš",           handle="AndrejBabis",
+         country="Czech Republic", iso3="CZE", office="Prime Minister",
+         files=["tweetsAndrejBabis.csv"]),
+    dict(leader_id="szydlo",     name="Beata Szydło",           handle="BeataSzydlo",
+         country="Poland",        iso3="POL", office="Prime Minister",
+         files=["tweetsBeataSzydlo.csv"]),
+    dict(leader_id="bolsonaro",  name="Jair Bolsonaro",              handle="jairbolsonaro",
+         country="Brazil",        iso3="BRA", office="President",
+         files=["tweetsBolsonaro.csv"]),
+    dict(leader_id="conte",      name="Giuseppe Conte",              handle="GiuseppeConteIT",
+         country="Italy",         iso3="ITA", office="Prime Minister",
+         files=["tweetsGiuseppeConteIT.csv"]),
+    dict(leader_id="johnson",    name="Boris Johnson",               handle="BorisJohnson",
+         country="United Kingdom", iso3="GBR", office="Prime Minister",
+         files=["tweetsJohnson.csv"]),
+    dict(leader_id="may",        name="Theresa May",                 handle="theresa_may",
+         country="United Kingdom", iso3="GBR", office="Prime Minister",
+         files=["tweetsMay.csv"]),
+    dict(leader_id="martin",     name="Micheál Martin",         handle="MichealMartinTD",
+         country="Ireland",       iso3="IRL", office="Taoiseach",
+         files=["tweetsMichealMartinTD.csv"]),
+    dict(leader_id="morrison",   name="Scott Morrison",              handle="ScottMorrisonMP",
+         country="Australia",     iso3="AUS", office="Prime Minister",
+         files=["tweetsScottMorrisonMP.csv"]),
+    dict(leader_id="suga",       name="Yoshihide Suga",              handle="sugawitter",
+         country="Japan",         iso3="JPN", office="Prime Minister",
+         files=["tweetsSuga.csv"]),
+    dict(leader_id="schallenberg", name="Alexander Schallenberg",    handle="a_schallenberg",
+         country="Austria",       iso3="AUT", office="Chancellor",
+         files=["tweetsa_schallenberg.csv"]),
+    dict(leader_id="solberg",    name="Erna Solberg",                handle="erna_solberg",
+         country="Norway",        iso3="NOR", office="Prime Minister",
+         files=["tweetserna_solberg.csv"]),
+    dict(leader_id="cassis",     name="Ignazio Cassis",              handle="ignaziocassis",
+         country="Switzerland",   iso3="CHE", office="President of the Confederation",
+         files=["tweetsignaziocassis.csv"]),
+    dict(leader_id="ardern",     name="Jacinda Ardern",              handle="jacindaardern",
+         country="New Zealand",   iso3="NZL", office="Prime Minister",
+         files=["tweetsjacindaardern.csv"]),
+    dict(leader_id="moon",       name="Moon Jae-in",                 handle="moonriver365",
+         country="South Korea",   iso3="KOR", office="President",
+         files=["tweetsmoonriver365.csv"]),
+    dict(leader_id="harper",     name="Stephen Harper",              handle="stephenharper",
+         country="Canada",        iso3="CAN", office="Prime Minister",
+         files=["tweetsstephenharper.csv"]),
+    dict(leader_id="wilmes",     name="Sophie Wilmès",          handle="Sophie_Wilmes",
+         country="Belgium",       iso3="BEL", office="Prime Minister",
+         files=["tweetSophie_Wilmes.csv"]),
+]
+
+# withSentiment CSVs produced by the pysentimiento pass, keyed by leader_id.
+SENTIMENT_FILES = {
+    "albanese":      "ALBANESEwithSentiment.csv",
+    "lopez_obrador": "AMLOwithSentiment.csv",
+    "biden":         "BIDENwithSentiment.csv",
+    "lula":          "LULAwithSentiment.csv",
+    "meloni":        "MELONIwithSentiment.csv",
+    "modi":          "MODIwithSentiment.csv",
+    "sanchez":       "SANCHEZwithSentiment.csv",
+    "morrison":      "SCOTTMORRISONwithSentiment.csv",
+    "sunak":         "SUNAKwithSentiment.csv",
+    "trudeau":       "TRUDEAUwithSentiment.csv",
+    "varadkar":      "VARADKARwithSentiment.csv",
+}
+
+assert len({l["leader_id"] for l in LEADERS}) == len(LEADERS) == 38

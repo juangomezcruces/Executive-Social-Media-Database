@@ -1,0 +1,74 @@
+# Publishes the web app to GitHub Pages.
+#
+# The workflow lives here rather than in webapp/.github/workflows/ because
+# GitHub only reads workflows from the repository root .github/workflows.
+#
+# There is no build step: the app is plain ES modules, so "building" is copying
+# webapp/ and the Parquet tables into one directory and uploading it. The data
+# is served from the site's own origin because GitHub's release asset CDN sends
+# no Access-Control-Allow-Origin header, so a browser cannot read release
+# assets cross-origin.
+
+name: Deploy web app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'webapp/**'
+      - 'data/**'
+      - '.github/workflows/deploy.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish; queue at most one behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          mkdir -p _site/data
+          cp -r webapp/. _site/
+          cp data/*.parquet _site/data/
+          cp data/manifest.json data/schema.json _site/data/
+          echo "--- site contents ---"
+          find _site -type f | sort
+          du -sh _site
+
+      - name: Check the data actually landed
+        run: |
+          set -euo pipefail
+          for f in tweets leaders sentiment; do
+            test -s "_site/data/$f.parquet" || { echo "missing _site/data/$f.parquet"; exit 1; }
+          done
+          test -s _site/data/manifest.json
+          test -s _site/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

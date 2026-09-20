@@ -1,0 +1,233 @@
+{
+  "dataset": "Executive Social Media Database",
+  "version": "v1.0.0",
+  "generated_from": "/sessions/rcw-01btpcf6dgz2jhkwztlfgrjv/mnt/APPROVAL VS MACHINE LEARNING",
+  "primary_key_note": "tweet_uid is the primary key. source_tweet_id is the raw X id and is not unique in 12 of the 52 collection files; check source_id_reliable before using it to rehydrate.",
+  "tables": {
+    "leaders": {
+      "rows": 38,
+      "columns": [
+        {
+          "name": "leader_id",
+          "type": "str",
+          "description": "Stable snake_case key. Join key for every other table."
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "description": "Full name of the executive, rendered in English."
+        },
+        {
+          "name": "handle",
+          "type": "str",
+          "description": "X/Twitter account the tweets were collected from, without the @."
+        },
+        {
+          "name": "country",
+          "type": "str",
+          "description": "Country name in English."
+        },
+        {
+          "name": "country_iso3",
+          "type": "str",
+          "description": "ISO 3166-1 alpha-3 country code."
+        },
+        {
+          "name": "office",
+          "type": "str",
+          "description": "Title held during the collection window."
+        },
+        {
+          "name": "n_tweets",
+          "type": "int64",
+          "description": "Number of distinct tweets for this leader in the tweets table."
+        },
+        {
+          "name": "first_tweet",
+          "type": "datetime64[us, UTC]",
+          "description": "Timestamp of the earliest tweet collected (UTC)."
+        },
+        {
+          "name": "last_tweet",
+          "type": "datetime64[us, UTC]",
+          "description": "Timestamp of the latest tweet collected (UTC)."
+        },
+        {
+          "name": "total_retweets",
+          "type": "int64",
+          "description": "Sum of retweet_count over all of this leader's tweets."
+        },
+        {
+          "name": "total_replies",
+          "type": "int64",
+          "description": "Sum of reply_count over all of this leader's tweets."
+        },
+        {
+          "name": "total_likes",
+          "type": "int64",
+          "description": "Sum of like_count over all of this leader's tweets."
+        },
+        {
+          "name": "total_quotes",
+          "type": "int64",
+          "description": "Sum of quote_count over all of this leader's tweets."
+        },
+        {
+          "name": "mean_engagement",
+          "type": "float64",
+          "description": "Mean of (retweets + replies + likes + quotes) per tweet."
+        },
+        {
+          "name": "source_id_reliable",
+          "type": "bool",
+          "description": "False when the raw collection file reused tweet ids across distinct tweets; see source_tweet_id."
+        },
+        {
+          "name": "has_sentiment",
+          "type": "bool",
+          "description": "True when this leader appears in the sentiment table."
+        },
+        {
+          "name": "source_files",
+          "type": "str",
+          "description": "Semicolon-separated raw collection files this leader was built from."
+        }
+      ]
+    },
+    "tweets": {
+      "rows": 327900,
+      "columns": [
+        {
+          "name": "tweet_uid",
+          "type": "string",
+          "description": "Primary key. BLAKE2b-64 digest of leader_id | created_at | text."
+        },
+        {
+          "name": "leader_id",
+          "type": "string",
+          "description": "Foreign key into leaders."
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "description": "Denormalised from leaders for convenient filtering."
+        },
+        {
+          "name": "country_iso3",
+          "type": "string",
+          "description": "Denormalised from leaders."
+        },
+        {
+          "name": "created_at",
+          "type": "datetime64[us, UTC]",
+          "description": "Tweet timestamp, UTC."
+        },
+        {
+          "name": "date",
+          "type": "object",
+          "description": "Calendar date of created_at, UTC. Convenience column for daily aggregation."
+        },
+        {
+          "name": "lang",
+          "type": "string",
+          "description": "Language code assigned by X at collection time."
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "description": "Tweet text as collected."
+        },
+        {
+          "name": "retweet_count",
+          "type": "int64",
+          "description": "Retweets at collection time."
+        },
+        {
+          "name": "reply_count",
+          "type": "int64",
+          "description": "Replies at collection time."
+        },
+        {
+          "name": "like_count",
+          "type": "int64",
+          "description": "Likes at collection time."
+        },
+        {
+          "name": "quote_count",
+          "type": "int64",
+          "description": "Quote tweets at collection time."
+        },
+        {
+          "name": "engagement",
+          "type": "int64",
+          "description": "retweet_count + reply_count + like_count + quote_count."
+        },
+        {
+          "name": "possibly_sensitive",
+          "type": "boolean",
+          "description": "X's possibly_sensitive flag; null where not returned."
+        },
+        {
+          "name": "in_reply_to_user_id",
+          "type": "string",
+          "description": "User id this tweet replies to; null for non-replies."
+        },
+        {
+          "name": "tweet_type",
+          "type": "string",
+          "description": "Tweet type as returned by the collector; frequently null."
+        },
+        {
+          "name": "source_tweet_id",
+          "type": "string",
+          "description": "Raw id from the collection file. NOT unique in 12 of 52 files."
+        },
+        {
+          "name": "source_id_reliable",
+          "type": "bool",
+          "description": "True when source_tweet_id is 1:1 with distinct tweets in this leader's source files."
+        },
+        {
+          "name": "source_file",
+          "type": "string",
+          "description": "Raw collection file this row came from."
+        }
+      ]
+    },
+    "sentiment": {
+      "rows": 142623,
+      "columns": [
+        {
+          "name": "tweet_uid",
+          "type": "str",
+          "description": "Foreign key into tweets."
+        },
+        {
+          "name": "leader_id",
+          "type": "str",
+          "description": "Foreign key into leaders."
+        },
+        {
+          "name": "sentiment",
+          "type": "str",
+          "description": "Predicted label: POS, NEU or NEG."
+        },
+        {
+          "name": "prob_neg",
+          "type": "float32",
+          "description": "Model probability for the NEG class."
+        },
+        {
+          "name": "prob_neu",
+          "type": "float32",
+          "description": "Model probability for the NEU class."
+        },
+        {
+          "name": "prob_pos",
+          "type": "float32",
+          "description": "Model probability for the POS class."
+        }
+      ]
+    }
+  }
+}

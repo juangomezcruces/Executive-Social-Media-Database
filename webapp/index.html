@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Social Media Database</title>
+<meta name="description" content="Query 327,900 tweets from 38 heads of government and state, 2010-2023, entirely in your browser.">
+<link rel="stylesheet" href="./src/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <h1>Executive Social Media Database</h1>
+    <p class="lede">
+      327,900 tweets and their engagement metrics from 38 heads of government
+      and state across 22 countries, 2010&ndash;2023. Every query below runs in
+      your browser &mdash; there is no server.
+    </p>
+    <p class="meta" id="release-meta" aria-live="polite">Loading dataset&hellip;</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="panel" aria-labelledby="filters-heading">
+    <h2 id="filters-heading" class="sr-only">Filters</h2>
+    <form class="filters" id="filters" role="search">
+      <div class="field">
+        <label for="f-leader">Leader</label>
+        <select id="f-leader"><option value="">All leaders</option></select>
+      </div>
+      <div class="field">
+        <label for="f-country">Country</label>
+        <select id="f-country"><option value="">All countries</option></select>
+      </div>
+      <div class="field">
+        <label for="f-start">From</label>
+        <input type="date" id="f-start" min="2010-01-01" max="2023-06-20">
+      </div>
+      <div class="field">
+        <label for="f-end">To</label>
+        <input type="date" id="f-end" min="2010-01-01" max="2023-06-20">
+      </div>
+      <div class="field">
+        <label for="f-engagement">Min engagement</label>
+        <input type="number" id="f-engagement" min="0" step="100" placeholder="0" inputmode="numeric">
+      </div>
+      <div class="field field--grow">
+        <label for="f-search">Text contains</label>
+        <input type="search" id="f-search" placeholder="e.g. climate" autocomplete="off">
+      </div>
+      <div class="field field--actions">
+        <button type="submit" class="btn btn--primary">Apply</button>
+        <button type="reset" class="btn">Reset</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="stats" id="stats" aria-label="Summary of the current selection"></section>
+
+  <div class="charts">
+    <section class="panel chart-panel" aria-labelledby="vol-heading">
+      <h2 id="vol-heading">Tweets per month</h2>
+      <p class="chart-note" id="vol-note">All leaders</p>
+      <div class="chart-box"><canvas id="chart-volume"></canvas></div>
+    </section>
+
+    <section class="panel chart-panel" aria-labelledby="eng-heading">
+      <h2 id="eng-heading">Mean engagement per tweet</h2>
+      <p class="chart-note">Leaders with at least 25 tweets in the current selection</p>
+      <div class="chart-box"><canvas id="chart-engagement"></canvas></div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="results-heading">
+    <div class="panel-head">
+      <h2 id="results-heading">Results</h2>
+      <p class="meta" id="result-count" aria-live="polite"></p>
+    </div>
+    <div class="table-scroll">
+      <table id="results">
+        <thead>
+          <tr>
+            <th scope="col">Leader</th>
+            <th scope="col">Date</th>
+            <th scope="col">Text</th>
+            <th scope="col" class="num">RT</th>
+            <th scope="col" class="num">Replies</th>
+            <th scope="col" class="num">Likes</th>
+            <th scope="col" class="num">Quotes</th>
+            <th scope="col" class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <nav class="pager" id="pager" aria-label="Results pages"></nav>
+  </section>
+
+  <section class="panel" aria-labelledby="sql-heading">
+    <h2 id="sql-heading">SQL console</h2>
+    <p class="chart-note">
+      DuckDB running in your browser. Tables:
+      <code>'tweets.parquet'</code>, <code>'leaders.parquet'</code>,
+      <code>'sentiment.parquet'</code>.
+    </p>
+    <form id="sql-form">
+      <textarea id="sql-input" rows="3" spellcheck="false">SELECT country, COUNT(*) AS tweets, ROUND(AVG(engagement)) AS mean_engagement
+FROM 'tweets.parquet' GROUP BY 1 ORDER BY 2 DESC;</textarea>
+      <button type="submit" class="btn btn--primary">Run query</button>
+    </form>
+    <div class="table-scroll"><table id="sql-results"><thead></thead><tbody></tbody></table></div>
+  </section>
+
+</main>
+
+<footer class="wrap footer">
+  <p>
+    Data and code:
+    <a href="https://github.com/juangomezcruces/Executive-Social-Media-Database">github.com/juangomezcruces/Executive-Social-Media-Database</a>
+    &middot; <a href="https://github.com/juangomezcruces/Executive-Social-Media-Database/blob/main/schema.md">Schema</a>
+  </p>
+  <p class="meta">
+    <code>source_tweet_id</code> is not unique in 12 of the 52 source files &mdash;
+    use <code>tweet_uid</code> as the key and check <code>source_id_reliable</code>
+    before rehydrating.
+  </p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

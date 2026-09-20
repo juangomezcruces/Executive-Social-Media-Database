@@ -1,0 +1,25 @@
+# The canonical tables are Parquet and ARE committed (the web app reads them
+# same-origin from GitHub Pages). The CSV copies are release assets only:
+# tweets.csv is 118 MB, over GitHub's hard 100 MB per-file limit.
+data/*.csv
+data/*.gz
+data2/
+
+# Intermediate export output
+scripts/__pycache__/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+r-package/..Rcheck/
+r-package/*.tar.gz
+
+# OS
+.DS_Store
