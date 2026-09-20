@@ -12,11 +12,99 @@ import {
 
 const PAGE_SIZE = 50;
 
+/**
+ * A searchable checkbox dropdown. Built by hand rather than pulled in as a
+ * dependency: with 60 leaders a native <select multiple> is unusable on a
+ * phone, and this is about eighty lines.
+ */
+function createMultiSelect(root, onChange) {
+  const toggle = root.querySelector('.multi-toggle');
+  const panel = root.querySelector('.multi-panel');
+  const search = root.querySelector('.multi-search');
+  const list = root.querySelector('.multi-options');
+  const summaryEl = root.querySelector('.multi-summary');
+  const placeholder = root.dataset.placeholder || 'All';
+  const noun = placeholder.replace(/^All\s+/, '');
+  let items = [];
+  const selected = new Set();
+
+  function summary() {
+    if (selected.size === 0) return placeholder;
+    if (selected.size === 1) {
+      const only = items.find((i) => i.value === [...selected][0]);
+      return only ? only.label : `1 ${noun}`;
+    }
+    if (selected.size === items.length) return `All ${noun}`;
+    return `${selected.size} ${noun} selected`;
+  }
+
+  function paint() {
+    summaryEl.textContent = summary();
+    root.dataset.active = selected.size > 0 ? 'true' : 'false';
+  }
+
+  function render() {
+    const needle = search.value.trim().toLowerCase();
+    const shown = needle
+      ? items.filter((i) => i.label.toLowerCase().includes(needle))
+      : items;
+    if (!shown.length) {
+      list.innerHTML = '<p class="multi-empty">No matches.</p>';
+      return;
+    }
+    list.innerHTML = shown.map((i) => `
+      <label class="multi-option" role="option"
+             aria-selected="${selected.has(i.value)}">
+        <input type="checkbox" value="${escapeHtml(i.value)}"
+               ${selected.has(i.value) ? 'checked' : ''}>
+        <span>${escapeHtml(i.label)}</span>
+      </label>`).join('');
+  }
+
+  function open(next) {
+    panel.hidden = !next;
+    toggle.setAttribute('aria-expanded', String(next));
+    if (next) { render(); search.focus(); }
+  }
+
+  toggle.addEventListener('click', () => open(panel.hidden));
+  search.addEventListener('input', render);
+  list.addEventListener('change', (event) => {
+    const box = event.target;
+    if (box.checked) selected.add(box.value); else selected.delete(box.value);
+    box.closest('.multi-option')?.setAttribute('aria-selected', String(box.checked));
+    paint();
+    onChange();
+  });
+  root.querySelector('[data-all]').addEventListener('click', () => {
+    items.forEach((i) => selected.add(i.value));
+    render(); paint(); onChange();
+  });
+  root.querySelector('[data-none]').addEventListener('click', () => {
+    selected.clear(); render(); paint(); onChange();
+  });
+  // Clicking away closes the panel; Escape returns focus to the button.
+  document.addEventListener('click', (event) => {
+    if (!panel.hidden && !root.contains(event.target)) open(false);
+  });
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !panel.hidden) { open(false); toggle.focus(); }
+  });
+
+  return {
+    setItems(next) { items = next; selected.clear(); paint(); render(); },
+    get value() { return [...selected]; },
+    clear() { selected.clear(); paint(); render(); },
+  };
+}
+
 const els = {
   releaseMeta: document.getElementById('release-meta'),
+  ledeCounts: document.getElementById('lede-counts'),
   form: document.getElementById('filters'),
   leader: document.getElementById('f-leader'),
   country: document.getElementById('f-country'),
+  noReplies: document.getElementById('f-noreplies'),
   start: document.getElementById('f-start'),
   end: document.getElementById('f-end'),
   engagement: document.getElementById('f-engagement'),
@@ -34,6 +122,9 @@ const els = {
 
 let page = 0;
 let charts = { volume: null, engagement: null };
+let sort = { column: 'created_at', direction: 'desc' };
+let leaderSelect = null;
+let countrySelect = null;
 
 const num = new Intl.NumberFormat('en-US');
 const fmtDate = (value) =>
@@ -56,12 +147,13 @@ function tokens() {
 
 function currentFilters() {
   return {
-    leader: els.leader.value || null,
-    country: els.country.value || null,
+    leaders: leaderSelect ? leaderSelect.value : [],
+    countries: countrySelect ? countrySelect.value : [],
     startDate: els.start.value || null,
     endDate: els.end.value || null,
     minEngagement: els.engagement.value ? Number(els.engagement.value) : null,
     search: els.search.value.trim() || null,
+    excludeReplies: els.noReplies.checked,
   };
 }
 
@@ -183,12 +275,27 @@ function renderStats(summary) {
   const mean = summary.tweets
     ? Math.round(summary.engagement / summary.tweets)
     : 0;
+  const replyShare = summary.tweets
+    ? Math.round((summary.replies / summary.tweets) * 100)
+    : 0;
   els.stats.innerHTML = `
     <dl class="stat"><dt>Tweets</dt><dd>${num.format(summary.tweets)}<span class="sub">${span}</span></dd></dl>
     <dl class="stat"><dt>Leaders</dt><dd>${num.format(summary.leaders)}</dd></dl>
     <dl class="stat"><dt>Total engagement</dt><dd>${num.format(summary.engagement || 0)}</dd></dl>
-    <dl class="stat"><dt>Mean per tweet</dt><dd>${num.format(mean)}</dd></dl>
+    <dl class="stat"><dt>Mean per tweet</dt><dd>${num.format(mean)}<span class="sub">${num.format(summary.replies || 0)} replies (${replyShare}%)</span></dd></dl>
   `;
+}
+
+/** Reflect the current sort in the header arrows and aria-sort. */
+function paintSortHeaders() {
+  for (const th of document.querySelectorAll('#results th[data-sort]')) {
+    th.setAttribute(
+      'aria-sort',
+      th.dataset.sort === sort.column
+        ? (sort.direction === 'asc' ? 'ascending' : 'descending')
+        : 'none',
+    );
+  }
 }
 
 function renderTable({ rows, total }) {
@@ -199,7 +306,7 @@ function renderTable({ rows, total }) {
       <tr>
         <td class="leader">${escapeHtml(r.leader)}</td>
         <td class="when">${fmtDate(r.created_at)}</td>
-        <td class="text">${escapeHtml(r.text)}</td>
+        <td class="text">${r.is_reply ? '<span class="tag">reply</span> ' : ''}${escapeHtml(r.text)}</td>
         <td class="num">${num.format(r.retweet_count)}</td>
         <td class="num">${num.format(r.reply_count)}</td>
         <td class="num">${num.format(r.like_count)}</td>
@@ -238,16 +345,36 @@ function escapeHtml(value) {
 // orchestration
 // --------------------------------------------------------------------------
 
+/** Human-readable summary of what the charts are currently showing. */
+function describeSelection({ leaders, countries, excludeReplies }) {
+  const parts = [];
+  if (leaders.length === 1) {
+    parts.push(document.querySelector(
+      `#f-leader .multi-option input[value="${CSS.escape(leaders[0])}"]`
+    )?.closest('.multi-option')?.textContent.trim() || '1 leader');
+  } else if (leaders.length > 1) {
+    parts.push(`${leaders.length} leaders`);
+  }
+  if (countries.length === 1) parts.push(countries[0]);
+  else if (countries.length > 1) parts.push(`${countries.length} countries`);
+  if (!parts.length) parts.push('All leaders');
+  if (excludeReplies) parts.push('excluding replies');
+  return parts.join(' · ');
+}
+
 async function refresh({ resetPage = true, chartsToo = true } = {}) {
   if (resetPage) page = 0;
   const filters = currentFilters();
 
-  els.volNote.textContent = filters.leader
-    ? els.leader.options[els.leader.selectedIndex].text
-    : (filters.country || 'All leaders');
+  els.volNote.textContent = describeSelection(filters);
 
   const work = [
-    queryTweets(filters, { limit: PAGE_SIZE, offset: page * PAGE_SIZE }).then(renderTable),
+    queryTweets(filters, {
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+      sort: sort.column,
+      direction: sort.direction,
+    }).then(renderTable),
   ];
   if (chartsToo) {
     work.push(
@@ -265,8 +392,32 @@ async function refresh({ resetPage = true, chartsToo = true } = {}) {
  * native form submission, which would reload the page.
  */
 function bindEvents() {
+  // The multi-selects live outside the form's native value handling, so they
+  // are built here and cleared explicitly on reset.
+  leaderSelect = createMultiSelect(els.leader, () => {});
+  countrySelect = createMultiSelect(els.country, () => {});
+
   els.form.addEventListener('submit', (event) => { event.preventDefault(); refresh(); });
-  els.form.addEventListener('reset', () => setTimeout(() => refresh(), 0));
+  els.form.addEventListener('reset', () => {
+    leaderSelect.clear();
+    countrySelect.clear();
+    sort = { column: 'created_at', direction: 'desc' };
+    paintSortHeaders();
+    setTimeout(() => refresh(), 0);
+  });
+
+  for (const th of document.querySelectorAll('#results th[data-sort]')) {
+    th.querySelector('button').addEventListener('click', () => {
+      const column = th.dataset.sort;
+      // Same column flips direction; a new column starts descending, except
+      // for the two text columns where A-Z is the useful first click.
+      sort = sort.column === column
+        ? { column, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
+        : { column, direction: column === 'leader' ? 'asc' : 'desc' };
+      paintSortHeaders();
+      refresh({ resetPage: true, chartsToo: false });
+    });
+  }
 
   els.sqlForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -308,13 +459,27 @@ async function main() {
       `Release ${manifest.version} · ${num.format(manifest.tables.tweets.rows)} tweets ` +
       `· generated ${manifest.generated_at.slice(0, 10)}`;
 
-    for (const leader of leaders) {
-      els.leader.add(new Option(`${leader.name} (${leader.country})`, leader.leader_id));
-    }
-    for (const country of [...new Set(leaders.map((l) => l.country))].sort()) {
-      els.country.add(new Option(country, country));
-    }
+    // Derived from the data rather than hardcoded, so the headline can't go
+    // stale the next time a batch of leaders is added.
+    const countries = new Set(leaders.map((l) => l.country));
+    const span = [
+      leaders.reduce((a, l) => Math.min(a, +new Date(l.first_tweet)), Infinity),
+      leaders.reduce((a, l) => Math.max(a, +new Date(l.last_tweet)), -Infinity),
+    ].map((t) => new Date(t).getUTCFullYear());
+    els.ledeCounts.textContent =
+      `${num.format(manifest.tables.tweets.rows)} tweets and their engagement ` +
+      `metrics from ${num.format(leaders.length)} heads of government and state ` +
+      `across ${countries.size} countries, ${span[0]}\u2013${span[1]}`;
 
+    leaderSelect.setItems(leaders.map((l) => ({
+      value: l.leader_id, label: `${l.name} (${l.country})`,
+    })));
+    countrySelect.setItems(
+      [...new Set(leaders.map((l) => l.country))].sort()
+        .map((c) => ({ value: c, label: c }))
+    );
+
+    paintSortHeaders();
     await refresh();
   } catch (error) {
     els.releaseMeta.textContent = `Could not load the dataset: ${error.message}`;

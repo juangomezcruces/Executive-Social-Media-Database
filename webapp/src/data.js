@@ -106,12 +106,23 @@ export async function queryLeaders() {
  * below filters identically and the table, charts and count can never disagree.
  */
 function where(filters = {}, prefix = '') {
-  const { leader, country, startDate, endDate, minEngagement, search } = filters;
+  const {
+    leaders = [], countries = [], startDate, endDate,
+    minEngagement, search, excludeReplies,
+  } = filters;
   const col = (name) => `${prefix}${name}`;
   const clauses = [];
   const params = [];
-  if (leader) { clauses.push(`${col('leader_id')} = ?`); params.push(leader); }
-  if (country) { clauses.push(`${col('country')} = ?`); params.push(country); }
+
+  // leaders and countries are multi-select: an empty list means "no filter".
+  if (leaders.length) {
+    clauses.push(`${col('leader_id')} IN (${leaders.map(() => '?').join(', ')})`);
+    params.push(...leaders);
+  }
+  if (countries.length) {
+    clauses.push(`${col('country')} IN (${countries.map(() => '?').join(', ')})`);
+    params.push(...countries);
+  }
   if (startDate) { clauses.push(`${col('date')} >= CAST(? AS DATE)`); params.push(startDate); }
   if (endDate) { clauses.push(`${col('date')} <= CAST(? AS DATE)`); params.push(endDate); }
   if (minEngagement) {
@@ -119,11 +130,35 @@ function where(filters = {}, prefix = '') {
     params.push(Number(minEngagement));
   }
   if (search) { clauses.push(`${col('text')} ILIKE ?`); params.push(`%${search}%`); }
+  if (excludeReplies) clauses.push(`NOT ${col('is_reply')}`);
+
   return { clause: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
 }
 
+/** Columns the results table may be ordered by, mapped to real SQL. */
+export const SORTABLE = {
+  leader: 'l.name',
+  created_at: 't.created_at',
+  retweet_count: 't.retweet_count',
+  reply_count: 't.reply_count',
+  like_count: 't.like_count',
+  quote_count: 't.quote_count',
+  engagement: 't.engagement',
+};
+
+/** Build a safe ORDER BY. Never interpolates user input. */
+function orderBy(sort, direction) {
+  const column = SORTABLE[sort] || SORTABLE.created_at;
+  const dir = String(direction).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  // tweet_uid breaks ties so paging is stable when values repeat.
+  return `ORDER BY ${column} ${dir} NULLS LAST, t.tweet_uid ASC`;
+}
+
 /** A page of tweets matching the filters, plus the total row count. */
-export async function queryTweets(filters = {}, { limit = 50, offset = 0 } = {}) {
+export async function queryTweets(
+  filters = {},
+  { limit = 50, offset = 0, sort = 'created_at', direction = 'desc' } = {},
+) {
   const bare = where(filters);
   const qualified = where(filters, 't.');
 
@@ -132,11 +167,12 @@ export async function queryTweets(filters = {}, { limit = 50, offset = 0 } = {})
   );
   const rows = await sql(`
     SELECT t.tweet_uid, l.name AS leader, t.country, t.created_at, t.lang, t.text,
-           t.retweet_count, t.reply_count, t.like_count, t.quote_count, t.engagement
+           t.is_reply, t.retweet_count, t.reply_count, t.like_count,
+           t.quote_count, t.engagement
     FROM 'tweets.parquet' t
     JOIN 'leaders.parquet' l ON l.leader_id = t.leader_id
     ${qualified.clause}
-    ORDER BY t.created_at DESC
+    ${orderBy(sort, direction)}
     LIMIT ${Number(limit)} OFFSET ${Number(offset)}
   `, qualified.params);
 
@@ -187,6 +223,7 @@ export async function querySummary(filters = {}) {
     SELECT COUNT(*) AS tweets,
            COUNT(DISTINCT leader_id) AS leaders,
            CAST(SUM(engagement) AS DOUBLE) AS engagement,
+           CAST(SUM(CASE WHEN is_reply THEN 1 ELSE 0 END) AS DOUBLE) AS replies,
            MIN(date) AS first_date,
            MAX(date) AS last_date
     FROM 'tweets.parquet'

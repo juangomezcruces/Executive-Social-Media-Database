@@ -14,9 +14,9 @@
   <div class="wrap">
     <h1>Executive Social Media Database</h1>
     <p class="lede">
-      327,900 tweets and their engagement metrics from 38 heads of government
-      and state across 22 countries, 2010&ndash;2023. Every query below runs in
-      your browser &mdash; there is no server.
+      <span id="lede-counts">Tweets and engagement metrics from heads of
+      government and state</span>. Every query below runs in your browser
+      &mdash; there is no server.
     </p>
     <p class="meta" id="release-meta" aria-live="polite">Loading dataset&hellip;</p>
   </div>
@@ -28,12 +28,42 @@
     <h2 id="filters-heading" class="sr-only">Filters</h2>
     <form class="filters" id="filters" role="search">
       <div class="field">
-        <label for="f-leader">Leader</label>
-        <select id="f-leader"><option value="">All leaders</option></select>
+        <span class="field-label" id="lbl-leader">Leaders</span>
+        <div class="multi" id="f-leader" data-placeholder="All leaders">
+          <button type="button" class="multi-toggle" aria-expanded="false"
+                  aria-haspopup="listbox" aria-labelledby="lbl-leader">
+            <span class="multi-summary">All leaders</span>
+            <span class="multi-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="multi-panel" hidden>
+            <input type="search" class="multi-search" placeholder="Search…"
+                   aria-label="Search leaders" autocomplete="off">
+            <div class="multi-actions">
+              <button type="button" class="linkbtn" data-all>Select all</button>
+              <button type="button" class="linkbtn" data-none>Clear</button>
+            </div>
+            <div class="multi-options" role="listbox" aria-multiselectable="true"></div>
+          </div>
+        </div>
       </div>
       <div class="field">
-        <label for="f-country">Country</label>
-        <select id="f-country"><option value="">All countries</option></select>
+        <span class="field-label" id="lbl-country">Countries</span>
+        <div class="multi" id="f-country" data-placeholder="All countries">
+          <button type="button" class="multi-toggle" aria-expanded="false"
+                  aria-haspopup="listbox" aria-labelledby="lbl-country">
+            <span class="multi-summary">All countries</span>
+            <span class="multi-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="multi-panel" hidden>
+            <input type="search" class="multi-search" placeholder="Search…"
+                   aria-label="Search countries" autocomplete="off">
+            <div class="multi-actions">
+              <button type="button" class="linkbtn" data-all>Select all</button>
+              <button type="button" class="linkbtn" data-none>Clear</button>
+            </div>
+            <div class="multi-options" role="listbox" aria-multiselectable="true"></div>
+          </div>
+        </div>
       </div>
       <div class="field">
         <label for="f-start">From</label>
@@ -50,6 +80,13 @@
       <div class="field field--grow">
         <label for="f-search">Text contains</label>
         <input type="search" id="f-search" placeholder="e.g. climate" autocomplete="off">
+      </div>
+      <div class="field field--check">
+        <label class="check">
+          <input type="checkbox" id="f-noreplies">
+          <span>Exclude replies</span>
+        </label>
+        <span class="hint">@-replies have far lower engagement than broadcast tweets</span>
       </div>
       <div class="field field--actions">
         <button type="submit" class="btn btn--primary">Apply</button>
@@ -83,14 +120,14 @@
       <table id="results">
         <thead>
           <tr>
-            <th scope="col">Leader</th>
-            <th scope="col">Date</th>
+            <th scope="col" data-sort="leader" aria-sort="none"><button type="button">Leader</button></th>
+            <th scope="col" data-sort="created_at" aria-sort="descending"><button type="button">Date</button></th>
             <th scope="col">Text</th>
-            <th scope="col" class="num">RT</th>
-            <th scope="col" class="num">Replies</th>
-            <th scope="col" class="num">Likes</th>
-            <th scope="col" class="num">Quotes</th>
-            <th scope="col" class="num">Total</th>
+            <th scope="col" class="num" data-sort="retweet_count" aria-sort="none"><button type="button">RT</button></th>
+            <th scope="col" class="num" data-sort="reply_count" aria-sort="none"><button type="button">Replies</button></th>
+            <th scope="col" class="num" data-sort="like_count" aria-sort="none"><button type="button">Likes</button></th>
+            <th scope="col" class="num" data-sort="quote_count" aria-sort="none"><button type="button">Quotes</button></th>
+            <th scope="col" class="num" data-sort="engagement" aria-sort="none"><button type="button">Total</button></th>
           </tr>
         </thead>
         <tbody></tbody>

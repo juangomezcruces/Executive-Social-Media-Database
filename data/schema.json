@@ -1,6 +1,6 @@
 {
   "dataset": "Executive Social Media Database",
-  "version": "v1.1.0",
+  "version": "v1.2.0",
   "generated_from": "/tmp/latam-src",
   "primary_key_note": "tweet_uid is the primary key. source_tweet_id is the raw X id and is not unique in 12 of the 52 collection files; check source_id_reliable before using it to rehydrate.",
   "tables": {
@@ -166,6 +166,11 @@
           "name": "engagement",
           "type": "int64",
           "description": "retweet_count + reply_count + like_count + quote_count."
+        },
+        {
+          "name": "is_reply",
+          "type": "boolean",
+          "description": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16."
         },
         {
           "name": "possibly_sensitive",

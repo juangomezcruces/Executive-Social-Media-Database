@@ -6,6 +6,56 @@ release is what propagates a change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.2.0] — 2026-09-21
+
+Adds an `is_reply` flag to `tweets`, after finding that a single day of
+automated replies was distorting the headline figures. No row was added,
+removed or otherwise changed.
+
+### Added
+
+- **`tweets.is_reply`** — true for conversational replies, false for broadcast
+  tweets. **92,735 rows (21.1%)** are replies, and they behave nothing like
+  ordinary posts: median engagement **3**, against **303** for everything else.
+  Compare posting volume with `WHERE NOT is_reply`.
+  The flag is the union of three signals, because none is complete on its own:
+  `in_reply_to_user_id` is set, `tweet_type = 'replied_to'`, or the text begins
+  with `@`. Metadata alone would miss 134 rows; the `@` test alone would miss
+  27,466 replies that open differently (`.@someone Thank you...`).
+- **Web app**: leaders and countries are now multi-select with search and
+  select-all/clear; every result column sorts, ascending and descending, with
+  `aria-sort` for screen readers; an "Exclude replies" toggle; a reply tag in
+  the results table; and a replies count in the summary tiles.
+- `export_data.py` now refuses to publish a half-populated `is_reply`, and
+  recomputes derived columns when `--base-tweets` reuses an export that predates
+  them — otherwise the reused batch would have silently carried the column
+  through as all-null, which is exactly what happened on the first run.
+
+### The Modi anomaly this came from
+
+On **16 March 2019** Modi's account has **38,090 tweets in 9.7 hours** — 65 a
+minute. Every one begins with `@`, 92% mention "Chowkidar", and their median
+engagement is 1 with 40% at zero. They are automated personalised replies from
+the [#MainBhiChowkidar campaign](https://en.wikipedia.org/wiki/Main_Bhi_Chowkidar),
+launched two days before. They are genuine, distinct tweets — not duplicates —
+but they are not comparable to anything else in the dataset.
+
+That one day is **67% of Modi's record** and **8.7% of the whole dataset**.
+With it, Modi is the most prolific leader here and his mean engagement reads
+8,486. Excluding replies he is third, at 26,307 — a threefold difference from a
+single afternoon. The next-largest single day for any leader in the dataset is
+Lula with 263.
+
+Nothing was removed: the rows are real and are still published. The flag simply
+makes them separable. Other reply-heavy accounts: Solberg 66%, Correa 59%,
+Ardern 57%.
+
+### Fixed
+
+- The web app's headline sentence was hardcoded and still read "327,900 tweets
+  from 38 heads of government across 22 countries" after v1.1.0. It is now
+  derived from the data, so it cannot go stale again.
+
 ## [v1.1.0] — 2026-09-21
 
 Adds 22 Latin American presidents. The dataset goes from 38 leaders in 22
@@ -127,5 +177,6 @@ First public release.
 - `tweet_type` and `in_reply_to_user_id` are frequently null — the collector did
   not populate them consistently.
 
+[v1.2.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.1.0
 [v1.0.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.0.0

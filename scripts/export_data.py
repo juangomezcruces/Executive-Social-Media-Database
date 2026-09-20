@@ -50,6 +50,35 @@ RAW_COLUMNS = [
 ]
 COUNT_COLUMNS = ["retweet_count", "reply_count", "like_count", "quote_count"]
 
+#: Final column order for the tweets table, shared by both collection batches.
+TWEET_COLUMNS = [
+    "tweet_uid", "leader_id", "country", "country_iso3", "created_at", "date",
+    "lang", "text", *COUNT_COLUMNS, "engagement", "is_reply", "possibly_sensitive",
+    "in_reply_to_user_id", "tweet_type", "source_tweet_id",
+    "source_id_reliable", "source_file",
+]
+
+
+def _is_reply(df: pd.DataFrame) -> pd.Series:
+    """Flag conversational replies, as opposed to broadcast tweets.
+
+    The union of three signals, because no single one is complete:
+
+    * ``in_reply_to_user_id`` is set -- the API's own answer, but frequently
+      null because the collector did not always request it;
+    * ``tweet_type == 'replied_to'`` -- likewise;
+    * the text begins with ``@`` -- the posting convention, which catches rows
+      whose metadata is missing.
+
+    Metadata alone would miss 134 rows; the ``@`` test alone would miss 27,466
+    genuine replies that open differently (``.@someone Thank you...``), so both
+    are used. The separation is real: replies have a median engagement of 3
+    against 303 for everything else.
+    """
+    by_metadata = df["in_reply_to_user_id"].notna() | df["tweet_type"].eq("replied_to")
+    by_convention = df["text"].str.startswith("@", na=False)
+    return (by_metadata.fillna(False) | by_convention.fillna(False)).astype("boolean")
+
 
 def _uid(leader_id: str, created_at: str, text: str) -> str:
     h = hashlib.blake2b(digest_size=8)
@@ -121,12 +150,8 @@ def build_tweets(source: Path) -> pd.DataFrame:
         tweets["in_reply_to_user_id"].replace({"NA": None}).astype("string")
     )
 
-    tweets = tweets[[
-        "tweet_uid", "leader_id", "country", "country_iso3", "created_at", "date",
-        "lang", "text", *COUNT_COLUMNS, "engagement", "possibly_sensitive",
-        "in_reply_to_user_id", "tweet_type", "source_tweet_id",
-        "source_id_reliable", "source_file",
-    ]]
+    tweets["is_reply"] = _is_reply(tweets)
+    tweets = tweets[TWEET_COLUMNS]
     return tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
 
 
@@ -209,12 +234,8 @@ def build_latam(source: Path) -> pd.DataFrame:
     for col in ("lang", "tweet_type", "in_reply_to_user_id"):
         tweets[col] = tweets[col].replace({"NA": None}).astype("string")
 
-    return tweets[[
-        "tweet_uid", "leader_id", "country", "country_iso3", "created_at", "date",
-        "lang", "text", *COUNT_COLUMNS, "engagement", "possibly_sensitive",
-        "in_reply_to_user_id", "tweet_type", "source_tweet_id",
-        "source_id_reliable", "source_file",
-    ]]
+    tweets["is_reply"] = _is_reply(tweets)
+    return tweets[TWEET_COLUMNS]
 
 
 def build_sentiment(source: Path, tweets: pd.DataFrame) -> pd.DataFrame:
@@ -349,6 +370,7 @@ SCHEMA_DOC = {
         "like_count": "Likes at collection time.",
         "quote_count": "Quote tweets at collection time.",
         "engagement": "retweet_count + reply_count + like_count + quote_count.",
+        "is_reply": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16.",
         "possibly_sensitive": "X's possibly_sensitive flag; null where not returned.",
         "in_reply_to_user_id": "User id this tweet replies to; null for non-replies.",
         "tweet_type": "Tweet type as returned by the collector; frequently null.",
@@ -421,6 +443,10 @@ def main() -> None:
     if args.base_tweets:
         print(f"reusing {args.base_tweets} for the original collection ...")
         tweets = pd.read_parquet(args.base_tweets)
+        # A base file exported before a derived column existed would otherwise
+        # carry it through as all-null. Derived columns are deterministic
+        # functions of columns already present, so just recompute them.
+        tweets["is_reply"] = _is_reply(tweets)
     else:
         print("building tweets ...")
         tweets = build_tweets(args.source)
@@ -432,7 +458,14 @@ def main() -> None:
             raise AssertionError(f"{len(overlap)} tweet_uid collisions between batches")
         print(f"  {len(latam):,} tweets across {latam.leader_id.nunique()} leaders")
         tweets = pd.concat([tweets, latam], ignore_index=True)
+        tweets = tweets[TWEET_COLUMNS]
         tweets = tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
+
+    if tweets["is_reply"].isna().any():
+        raise AssertionError(
+            f"{int(tweets['is_reply'].isna().sum()):,} rows have a null is_reply; "
+            "refusing to publish a half-populated flag."
+        )
     if args.base_sentiment:
         print(f"reusing {args.base_sentiment} for sentiment ...")
         sentiment = pd.read_parquet(args.base_sentiment)

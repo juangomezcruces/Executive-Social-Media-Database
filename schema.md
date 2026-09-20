@@ -22,7 +22,7 @@ Rows are therefore keyed on **`tweet_uid`**, a BLAKE2b-64 digest of
 for that leader -- check it before using ids to rehydrate against the X API.
 
 
-*Generated from `data/schema.json` for release `v1.1.0`.*
+*Generated from `data/schema.json` for release `v1.2.0`.*
 
 ## `leaders`
 
@@ -68,6 +68,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `like_count` | `int64` | Likes at collection time. |
 | `quote_count` | `int64` | Quote tweets at collection time. |
 | `engagement` | `int64` | retweet_count + reply_count + like_count + quote_count. |
+| `is_reply` | `boolean` | True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16. |
 | `possibly_sensitive` | `boolean` | X's possibly_sensitive flag; null where not returned. |
 | `in_reply_to_user_id` | `string` | User id this tweet replies to; null for non-replies. |
 | `tweet_type` | `string` | Tweet type as returned by the collector; frequently null. |

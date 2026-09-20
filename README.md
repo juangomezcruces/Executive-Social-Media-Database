@@ -7,7 +7,7 @@ Three ways in, all reading the same versioned dataset:
 
 | | |
 | --- | --- |
-| **Browse & query** | <https://juangomezcruces.github.io/Executive-Social-Media-Database/> — filter, chart and run SQL in the browser, no install |
+| **Browse & query** | <https://juangomezcruces.github.io/Executive-Social-Media-Database/> — filter by any combination of leaders and countries, sort by any column, chart and run SQL in the browser, no install |
 | **Python** | `pip install "git+https://github.com/juangomezcruces/Executive-Social-Media-Database.git#subdirectory=python-package"` |
 | **R** | `remotes::install_github("juangomezcruces/Executive-Social-Media-Database", subdir = "r-package")` |
 
@@ -23,7 +23,7 @@ Three tables, published as Parquet (canonical) and CSV on every tagged release.
 | table | rows | what it is |
 | --- | --- | --- |
 | `leaders` | 60 | one row per executive: identifiers, country, office, per-leader totals |
-| `tweets` | 440,004 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes |
+| `tweets` | 440,004 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes, and an `is_reply` flag |
 | `sentiment` | 142,623 | POS/NEU/NEG label and class probabilities, for the 11 leaders that were classified |
 
 `leaders` is the dimension table. `tweets` and `sentiment` join to it on
@@ -86,6 +86,37 @@ Rows are deduplicated on `(leader_id, created_at, text)`, which removed 362 rows
 (0.09%) from the original 407,427 and 11 rows from the 112,115 in the Latin
 America batch.
 
+### Replies are not broadcast tweets — read this before comparing volume
+
+**21% of the dataset (92,735 rows) is conversational replies**, and they behave
+nothing like a leader's ordinary posts: median engagement **3**, against **303**
+for everything else. The `is_reply` flag marks them, so
+
+```sql
+SELECT leader_id, COUNT(*) FROM tweets WHERE NOT is_reply GROUP BY 1
+```
+
+is the honest way to compare how much leaders actually posted.
+
+The clearest case is **Narendra Modi on 16 March 2019**: 38,090 tweets in 9.7
+hours — 65 a minute — every one an `@`-reply, 92% of them mentioning
+"Chowkidar". They are automated personalised replies from the
+[#MainBhiChowkidar campaign](https://en.wikipedia.org/wiki/Main_Bhi_Chowkidar),
+launched two days earlier. They are genuine, distinct tweets, but they are not
+comparable to anything else in the dataset: their median engagement is 1 and 40%
+have none at all.
+
+That single day is **67% of Modi's record** and **8.7% of the entire dataset**.
+Counting it, Modi is the most prolific leader here and his mean engagement is
+8,486. Excluding replies he is third, with a mean of 26,307 — a threefold
+difference produced entirely by one afternoon of automation. Other reply-heavy
+accounts include Solberg (66%), Correa (59%) and Ardern (57%).
+
+`is_reply` is true when the API's own `in_reply_to_user_id` or
+`tweet_type = 'replied_to'` says so, **or** the text begins with `@`. All three
+are needed: metadata alone misses 134 rows, and the `@` test alone misses 27,466
+replies that open differently (`.@someone Thank you...`).
+
 ### The tweet id problem
 
 The raw collection files carry an `id` column that is **not a usable primary
@@ -129,7 +160,7 @@ same-origin — see below.
 
 ```bash
 python scripts/export_data.py --source /path/to/raw/csvs --out data
-python scripts/make_manifest.py --data data --version v1.1.0
+python scripts/make_manifest.py --data data --version v1.2.0
 python scripts/make_schema_md.py --data data --out schema.md
 ```
 
