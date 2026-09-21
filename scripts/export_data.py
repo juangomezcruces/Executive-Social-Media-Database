@@ -42,6 +42,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from leaders import LEADERS, SENTIMENT_FILES  # noqa: E402
 from leaders_latam import LATAM_LEADERS, SOURCE_FILE as LATAM_FILE  # noqa: E402
+from leaders_us import US_LEADERS, SOURCE_FILE as US_FILE  # noqa: E402
 
 RAW_COLUMNS = [
     "text", "id", "lang", "created_at", "retweet_count", "reply_count",
@@ -53,8 +54,8 @@ COUNT_COLUMNS = ["retweet_count", "reply_count", "like_count", "quote_count"]
 #: Final column order for the tweets table, shared by both collection batches.
 TWEET_COLUMNS = [
     "tweet_uid", "leader_id", "country", "country_iso3", "created_at", "date",
-    "lang", "text", *COUNT_COLUMNS, "engagement", "is_reply", "possibly_sensitive",
-    "in_reply_to_user_id", "tweet_type", "source_tweet_id",
+    "lang", "text", *COUNT_COLUMNS, "engagement", "is_reply", "is_deleted",
+    "possibly_sensitive", "in_reply_to_user_id", "tweet_type", "source_tweet_id",
     "source_id_reliable", "source_file",
 ]
 
@@ -151,6 +152,8 @@ def build_tweets(source: Path) -> pd.DataFrame:
     )
 
     tweets["is_reply"] = _is_reply(tweets)
+    # This source records no deletions, so the flag is unknown, not false.
+    tweets["is_deleted"] = pd.Series(pd.NA, index=tweets.index, dtype="boolean")
     tweets = tweets[TWEET_COLUMNS]
     return tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
 
@@ -235,6 +238,79 @@ def build_latam(source: Path) -> pd.DataFrame:
         tweets[col] = tweets[col].replace({"NA": None}).astype("string")
 
     tweets["is_reply"] = _is_reply(tweets)
+    # This source records no deletions, so the flag is unknown, not false.
+    tweets["is_deleted"] = pd.Series(pd.NA, index=tweets.index, dtype="boolean")
+    return tweets[TWEET_COLUMNS]
+
+
+def build_us(source: Path) -> pd.DataFrame:
+    """Normalise the US presidential archive into the tweets schema.
+
+    Unlike the other two batches, this source's ``id`` really is unique -- one
+    row per id across the whole file -- so ``source_id_reliable`` is true here.
+
+    Timestamps are naive (``2017-01-20 17:00:00.000000``) and are read as UTC,
+    which is how the archive publishes them.
+    """
+    path = source / US_FILE
+    if not path.exists():
+        print(f"  ! {US_FILE} not found, skipping the US batch", file=sys.stderr)
+        return pd.DataFrame()
+
+    raw = pd.read_csv(path, dtype=str, low_memory=False, encoding_errors="replace")
+    frames = []
+    for leader in US_LEADERS:
+        df = raw[raw["twitter_handle"] == leader["handle_in_file"]].copy()
+        if df.empty:
+            raise ValueError(f"{leader['leader_id']}: no rows for "
+                             f"twitter_handle={leader['handle_in_file']!r}")
+        df["text"] = df["text"].fillna("")
+        df["leader_id"] = leader["leader_id"]
+        df["country"] = leader["country"]
+        df["country_iso3"] = leader["iso3"]
+
+        distinct = df.drop_duplicates(["date", "text"]).shape[0]
+        df["source_id_reliable"] = df["id"].nunique() == distinct
+        df = df.drop_duplicates(["date", "text"], keep="first")
+        frames.append(df)
+
+    tweets = pd.concat(frames, ignore_index=True)
+    tweets["source_file"] = US_FILE
+    tweets["tweet_uid"] = [
+        _uid(l, c, t) for l, c, t in
+        zip(tweets["leader_id"], tweets["date"], tweets["text"])
+    ]
+
+    ts = pd.to_datetime(tweets["date"], errors="coerce", utc=True, format="mixed")
+    if ts.isna().any():
+        raise AssertionError(f"{int(ts.isna().sum())} unparsable timestamps in {US_FILE}")
+    tweets["created_at"] = ts
+    tweets["date"] = ts.dt.date
+
+    # 1,021 Trump rows carry no quote or reply count. They are recorded as 0,
+    # matching how every other batch treats a missing count, and called out in
+    # the changelog -- so his engagement is marginally understated on those rows.
+    renames = {"retweets": "retweet_count", "favorites": "like_count",
+               "quoteTweets": "quote_count", "replies": "reply_count",
+               "id": "source_tweet_id"}
+    tweets = tweets.rename(columns=renames)
+    for col in COUNT_COLUMNS:
+        tweets[col] = pd.to_numeric(tweets[col], errors="coerce").fillna(0).astype("int64")
+    tweets["engagement"] = tweets[COUNT_COLUMNS].sum(axis=1)
+
+    # The archive gives booleans where the other batches give a type string.
+    tweets["tweet_type"] = pd.Series(
+        [("retweeted" if r == "1" else "quoted" if q == "1" else None)
+         for r, q in zip(tweets["isRetweet"], tweets["isQuote"])],
+        index=tweets.index, dtype="string")
+    tweets["is_deleted"] = tweets["isDeleted"].eq("1").astype("boolean")
+
+    # No language, sensitivity or reply-target metadata in this source.
+    for col in ("lang", "in_reply_to_user_id"):
+        tweets[col] = pd.Series(pd.NA, index=tweets.index, dtype="string")
+    tweets["possibly_sensitive"] = pd.Series(pd.NA, index=tweets.index, dtype="boolean")
+
+    tweets["is_reply"] = _is_reply(tweets)
     return tweets[TWEET_COLUMNS]
 
 
@@ -301,6 +377,7 @@ def build_leaders(tweets: pd.DataFrame, sentiment: pd.DataFrame) -> pd.DataFrame
     registry = [dict(l, source_files=";".join(l["files"]), populist=None)
                 for l in LEADERS]
     registry += [dict(l, source_files=LATAM_FILE) for l in LATAM_LEADERS]
+    registry += [dict(l, source_files=US_FILE, populist=None) for l in US_LEADERS]
 
     rows = []
     for leader in registry:
@@ -370,6 +447,7 @@ SCHEMA_DOC = {
         "like_count": "Likes at collection time.",
         "quote_count": "Quote tweets at collection time.",
         "engagement": "retweet_count + reply_count + like_count + quote_count.",
+        "is_deleted": "True when the source archive records the tweet as later deleted. Only populated for the US batch (Trump, Obama); null elsewhere, which means unknown rather than false.",
         "is_reply": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16.",
         "possibly_sensitive": "X's possibly_sensitive flag; null where not returned.",
         "in_reply_to_user_id": "User id this tweet replies to; null for non-replies.",
@@ -447,19 +525,26 @@ def main() -> None:
         # carry it through as all-null. Derived columns are deterministic
         # functions of columns already present, so just recompute them.
         tweets["is_reply"] = _is_reply(tweets)
+        if "is_deleted" not in tweets.columns:
+            tweets["is_deleted"] = pd.Series(pd.NA, index=tweets.index, dtype="boolean")
     else:
         print("building tweets ...")
         tweets = build_tweets(args.source)
-    print("building the Latin America batch ...")
-    latam = build_latam(args.source)
-    if not latam.empty:
-        overlap = set(tweets["tweet_uid"]) & set(latam["tweet_uid"])
+    for label, builder in (("Latin America", build_latam), ("US", build_us)):
+        print(f"building the {label} batch ...")
+        batch = builder(args.source)
+        if batch.empty:
+            continue
+        overlap = set(tweets["tweet_uid"]) & set(batch["tweet_uid"])
         if overlap:
-            raise AssertionError(f"{len(overlap)} tweet_uid collisions between batches")
-        print(f"  {len(latam):,} tweets across {latam.leader_id.nunique()} leaders")
-        tweets = pd.concat([tweets, latam], ignore_index=True)
-        tweets = tweets[TWEET_COLUMNS]
-        tweets = tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
+            raise AssertionError(
+                f"{len(overlap)} tweet_uid collisions between the {label} batch "
+                "and what is already loaded")
+        print(f"  {len(batch):,} tweets across {batch.leader_id.nunique()} leaders")
+        tweets = pd.concat([tweets, batch], ignore_index=True)
+
+    tweets = tweets[TWEET_COLUMNS]
+    tweets = tweets.sort_values(["leader_id", "created_at"]).reset_index(drop=True)
 
     if tweets["is_reply"].isna().any():
         raise AssertionError(

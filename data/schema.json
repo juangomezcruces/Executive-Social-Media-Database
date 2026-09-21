@@ -1,11 +1,11 @@
 {
   "dataset": "Executive Social Media Database",
-  "version": "v1.2.0",
-  "generated_from": "/tmp/latam-src",
+  "version": "v1.3.0",
+  "generated_from": "/tmp/us-src",
   "primary_key_note": "tweet_uid is the primary key. source_tweet_id is the raw X id and is not unique in 12 of the 52 collection files; check source_id_reliable before using it to rehydrate.",
   "tables": {
     "leaders": {
-      "rows": 60,
+      "rows": 62,
       "columns": [
         {
           "name": "leader_id",
@@ -44,12 +44,12 @@
         },
         {
           "name": "first_tweet",
-          "type": "datetime64[ns, UTC]",
+          "type": "datetime64[us, UTC]",
           "description": "Timestamp of the earliest tweet collected (UTC)."
         },
         {
           "name": "last_tweet",
-          "type": "datetime64[ns, UTC]",
+          "type": "datetime64[us, UTC]",
           "description": "Timestamp of the latest tweet collected (UTC)."
         },
         {
@@ -100,7 +100,7 @@
       ]
     },
     "tweets": {
-      "rows": 440004,
+      "rows": 498605,
       "columns": [
         {
           "name": "tweet_uid",
@@ -124,7 +124,7 @@
         },
         {
           "name": "created_at",
-          "type": "object",
+          "type": "datetime64[us, UTC]",
           "description": "Tweet timestamp, UTC."
         },
         {
@@ -171,6 +171,11 @@
           "name": "is_reply",
           "type": "boolean",
           "description": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16."
+        },
+        {
+          "name": "is_deleted",
+          "type": "boolean",
+          "description": "True when the source archive records the tweet as later deleted. Only populated for the US batch (Trump, Obama); null elsewhere, which means unknown rather than false."
         },
         {
           "name": "possibly_sensitive",

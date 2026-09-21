@@ -6,6 +6,67 @@ release is what propagates a change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.3.0] — 2026-09-21
+
+Adds **Donald Trump and Barack Obama**, from an archive export that finally
+carries all four engagement metrics — the gap that kept Trump out of v1.1.0.
+62 leaders, 498,605 tweets. No existing row changed.
+
+### Added
+
+- **Donald Trump** — `@realDonaldTrump`, **58,249 tweets**, 2009-05-04 to
+  2021-01-08, ending with his suspension. Mean engagement 38,690; 54,940 of the
+  tweets are broadcast rather than replies, making him the most prolific
+  broadcaster in the dataset.
+- **Barack Obama** — `@POTUS`, **352 tweets**, 2015-05-18 to 2017-01-20. Mean
+  engagement 73,136, the highest of any leader here.
+- **`tweets.is_deleted`** — true where the archive records a tweet as later
+  deleted: 1,354 rows, 1,353 of them Trump's. Null for every leader outside this
+  batch, meaning *unknown*, not false, since no other source records deletions.
+- `scripts/leaders_us.py`, and a `build_us()` stage in `export_data.py`.
+
+### Judgement calls, and why
+
+- **`ObamaWhiteHouse` was not imported.** The archive contains it — 27,347
+  tweets — but it is the institutional White House feed: its first tweet is
+  "Welcome to the official Twitter page for the White House!" and it retweets
+  federal agencies. Its mean engagement is **713**, against **73,136** for
+  `@POTUS`: a hundredfold gap. Folding it into "Obama" would have made his
+  record 99% staff-written and wrecked every engagement comparison, in exactly
+  the way Modi's automated replies did before `is_reply` existed.
+- **`POTUS45` was not imported.** Trump's official presidential account overlaps
+  `@realDonaldTrump` by only 610 texts, so it would have added roughly 4,290
+  distinct official tweets. Left out to keep Trump a single-account record.
+- **`@BarackObama` is absent from the source entirely.** It is the account that
+  would be most comparable with the rest of the dataset, and Obama's 352 rows
+  are a placeholder until an archive of it turns up. Treat his figures as
+  representative of his `@POTUS` output only.
+
+### Data quality notes
+
+- **Tweet ids in this batch are genuinely unique** — 90,852 ids across 90,852
+  rows — so `source_id_reliable` is **true** for Trump and Obama. They are the
+  first leaders in the dataset whose `source_tweet_id` can be used to rehydrate.
+- **1,021 Trump rows carry no quote or reply count** (1.7% of his total, dated
+  2016-01-13 to 2020-11-25). They are recorded as 0, matching how every other
+  batch treats a missing count, so his engagement is marginally understated on
+  those rows.
+- **Timestamps are naive in the source** and are read as UTC, which is how the
+  archive publishes them.
+- **Half of Trump's record predates his presidency**: 31,955 tweets before
+  2017-01-20. That is consistent with the rest of the dataset, which already
+  includes pre-office tweets for Meloni, Bolsonaro and others, but it matters
+  for any in-office comparison. Filter on `created_at` if you need one.
+- `lang`, `possibly_sensitive` and `in_reply_to_user_id` are null for this
+  batch — the archive does not carry them. `is_reply` therefore rests on the
+  `@`-prefix convention alone here (5.7% of Trump's tweets, 2.0% of Obama's),
+  which is a weaker signal than for leaders with reply metadata.
+
+### Still not included
+
+- Iván Duque, Alberto Fernández and Juan Guaidó, who appear only in timeline
+  files with retweets and favourites but no reply or quote counts.
+
 ## [v1.2.0] — 2026-09-21
 
 Adds an `is_reply` flag to `tweets`, after finding that a single day of
@@ -177,6 +238,7 @@ First public release.
 - `tweet_type` and `in_reply_to_user_id` are frequently null — the collector did
   not populate them consistently.
 
+[v1.3.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.3.0
 [v1.2.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.1.0
 [v1.0.0]: https://github.com/juangomezcruces/Executive-Social-Media-Database/releases/tag/v1.0.0

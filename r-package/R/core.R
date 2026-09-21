@@ -129,7 +129,8 @@ clear_cache <- function() {
       engagement = readr::col_integer(),
       possibly_sensitive = readr::col_logical(),
       source_id_reliable = readr::col_logical(),
-      is_reply = readr::col_logical()
+      is_reply = readr::col_logical(),
+      is_deleted = readr::col_logical()
     ),
     sentiment = list(
       prob_neg = readr::col_double(),

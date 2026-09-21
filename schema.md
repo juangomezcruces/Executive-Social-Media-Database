@@ -22,11 +22,11 @@ Rows are therefore keyed on **`tweet_uid`**, a BLAKE2b-64 digest of
 for that leader -- check it before using ids to rehydrate against the X API.
 
 
-*Generated from `data/schema.json` for release `v1.2.0`.*
+*Generated from `data/schema.json` for release `v1.3.0`.*
 
 ## `leaders`
 
-60 rows.
+62 rows.
 
 | column | type | description |
 | --- | --- | --- |
@@ -37,8 +37,8 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `country_iso3` | `str` | ISO 3166-1 alpha-3 country code. |
 | `office` | `str` | Title held during the collection window. |
 | `n_tweets` | `int64` | Number of distinct tweets for this leader in the tweets table. |
-| `first_tweet` | `datetime64[ns, UTC]` | Timestamp of the earliest tweet collected (UTC). |
-| `last_tweet` | `datetime64[ns, UTC]` | Timestamp of the latest tweet collected (UTC). |
+| `first_tweet` | `datetime64[us, UTC]` | Timestamp of the earliest tweet collected (UTC). |
+| `last_tweet` | `datetime64[us, UTC]` | Timestamp of the latest tweet collected (UTC). |
 | `total_retweets` | `int64` | Sum of retweet_count over all of this leader's tweets. |
 | `total_replies` | `int64` | Sum of reply_count over all of this leader's tweets. |
 | `total_likes` | `int64` | Sum of like_count over all of this leader's tweets. |
@@ -51,7 +51,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 
 ## `tweets`
 
-440,004 rows.
+498,605 rows.
 
 | column | type | description |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `leader_id` | `string` | Foreign key into leaders. |
 | `country` | `string` | Denormalised from leaders for convenient filtering. |
 | `country_iso3` | `string` | Denormalised from leaders. |
-| `created_at` | `object` | Tweet timestamp, UTC. |
+| `created_at` | `datetime64[us, UTC]` | Tweet timestamp, UTC. |
 | `date` | `object` | Calendar date of created_at, UTC. Convenience column for daily aggregation. |
 | `lang` | `string` | Language code assigned by X at collection time. |
 | `text` | `string` | Tweet text as collected. |
@@ -69,6 +69,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `quote_count` | `int64` | Quote tweets at collection time. |
 | `engagement` | `int64` | retweet_count + reply_count + like_count + quote_count. |
 | `is_reply` | `boolean` | True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16. |
+| `is_deleted` | `boolean` | True when the source archive records the tweet as later deleted. Only populated for the US batch (Trump, Obama); null elsewhere, which means unknown rather than false. |
 | `possibly_sensitive` | `boolean` | X's possibly_sensitive flag; null where not returned. |
 | `in_reply_to_user_id` | `string` | User id this tweet replies to; null for non-replies. |
 | `tweet_type` | `string` | Tweet type as returned by the collector; frequently null. |

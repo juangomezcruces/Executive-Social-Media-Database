@@ -1,7 +1,7 @@
 # Executive Social Media Database
 
-**440,004 tweets and their engagement metrics from 60 heads of government and
-state across 34 countries, January 2010 – June 2023.**
+**498,605 tweets and their engagement metrics from 62 heads of government and
+state across 34 countries, May 2009 – June 2023.**
 
 Three ways in, all reading the same versioned dataset:
 
@@ -22,8 +22,8 @@ Three tables, published as Parquet (canonical) and CSV on every tagged release.
 
 | table | rows | what it is |
 | --- | --- | --- |
-| `leaders` | 60 | one row per executive: identifiers, country, office, per-leader totals |
-| `tweets` | 440,004 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes, and an `is_reply` flag |
+| `leaders` | 62 | one row per executive: identifiers, country, office, per-leader totals |
+| `tweets` | 498,605 | one row per tweet: text, language, timestamp, retweets, replies, likes, quotes, plus `is_reply` and `is_deleted` flags |
 | `sentiment` | 142,623 | POS/NEU/NEG label and class probabilities, for the 11 leaders that were classified |
 
 `leaders` is the dimension table. `tweets` and `sentiment` join to it on
@@ -34,15 +34,17 @@ collections. The 21 leaders in the 2023 run start at 2018-01-01; the 17 from the
 2022 run reach back as far as 2010 but stop at 2023-06-07; the 22 Latin American
 presidents added in v1.1.0 each span only their own time in office, from
 Chávez's 1,000 tweets ending in February 2013 to Maduro's 11,724 across
-2021–2022. `leaders.first_tweet` and `leaders.last_tweet` give each leader's
+2021–2022; and the two US presidents added in v1.3.0 are asymmetric by
+necessity — Trump's 58,249 tweets against Obama's 352, because Obama's personal
+account is not in the available archive (see below). `leaders.first_tweet` and `leaders.last_tweet` give each leader's
 real window — check them before comparing leaders across time, because a leader
 with fewer tweets usually had a shorter collected period, not a quieter one.
 
 ```python
 import leaders_tweets as lt
 
-lt.data_version()                                        # 'v1.1.0'
-lt.load_leaders()                                        # 60 rows
+lt.data_version()                                        # 'v1.3.0'
+lt.load_leaders()                                        # 62 rows
 lt.get_tweets("Modi", start="2022-01-01", end="2022-12-31")
 lt.get_sentiment("Trudeau")
 ```
@@ -78,6 +80,20 @@ collection covering 2010–2023, assembled for research on populist communicatio
 Its `type_of_leader` coding is preserved as the `populist` column on `leaders`
 — it is the dataset author's own research classification, not an external
 standard, and it is null for every leader outside that batch.
+
+**Trump and Obama** (v1.3.0) come from a separate archive export with all four
+engagement metrics and, unusually, genuinely unique tweet ids. Trump is
+`@realDonaldTrump`, 2009–2021, ending with his suspension. Obama is `@POTUS`
+during his term — **352 tweets**, because the archive does not contain
+`@BarackObama`, his main personal account. The archive's `ObamaWhiteHouse`
+account (27,347 tweets) was deliberately **not** imported: it is the
+institutional White House feed, staff-written, with a mean engagement of 713
+against `@POTUS`'s 73,136. Attributing it to Obama would have made his record
+overwhelmingly institutional and destroyed any engagement comparison.
+
+That archive also marks tweets later deleted, preserved as **`is_deleted`**
+(1,354 rows, 1,353 of them Trump's). It is null — meaning *unknown*, not false —
+for every leader outside that batch, because no other source records deletions.
 
 Sentiment labels come from a `pysentimiento` classifier run over the tweet text
 for 11 leaders; the three probabilities sum to 1.
@@ -142,6 +158,7 @@ scripts/
   export_data.py       raw CSVs -> canonical tables + schema.json
   leaders.py           the original 38-leader registry and file mapping
   leaders_latam.py     the 22 Latin American presidents added in v1.1.0
+  leaders_us.py        Trump and Obama, added in v1.3.0
   make_manifest.py     writes the release pointer every client reads
   make_schema_md.py    renders schema.md from schema.json
   serve_site.py        local preview server with HTTP Range support
@@ -151,16 +168,16 @@ r-package/             leaderstweets
 .github/workflows/     Pages deployment
 ```
 
-`data/*.csv` is git-ignored: `tweets.csv` is 157 MB, past GitHub's hard 100 MB
+`data/*.csv` is git-ignored: `tweets.csv` is 182 MB, past GitHub's hard 100 MB
 per-file limit. The CSVs are attached to each release instead. The Parquet files
-(49 MB total) **are** committed, because the web app has to read them
+(55 MB total) **are** committed, because the web app has to read them
 same-origin — see below.
 
 ### Regenerating the dataset
 
 ```bash
 python scripts/export_data.py --source /path/to/raw/csvs --out data
-python scripts/make_manifest.py --data data --version v1.2.0
+python scripts/make_manifest.py --data data --version v1.3.0
 python scripts/make_schema_md.py --data data --out schema.md
 ```
 
