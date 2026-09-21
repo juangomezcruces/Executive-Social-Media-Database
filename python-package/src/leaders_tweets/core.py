@@ -50,7 +50,7 @@ REPO = "juangomezcruces/Executive-Social-Media-Database"
 #: The deployed Worker. Override for a local API with LEADERS_TWEETS_API.
 #: scripts/set_api_url.py rewrites this line, webapp/src/config.js and the R
 #: package together, so the three clients cannot drift apart.
-API_BASE = "https://esmd-api.REPLACE-ME.workers.dev/v1"
+API_BASE = "https://esmd-api.esmd.workers.dev/v1"
 
 #: how long a cached manifest is trusted before we re-check for a new release
 MANIFEST_TTL_SECONDS = 24 * 60 * 60

@@ -11,7 +11,7 @@
  * are typed in by their holder and kept in that browser's local storage.
  */
 
-export const API_BASE = 'https://esmd-api.REPLACE-ME.workers.dev/v1';
+export const API_BASE = 'https://esmd-api.esmd.workers.dev/v1';
 
 /** True while the placeholder above is still in place. */
 export const API_CONFIGURED = !API_BASE.includes('REPLACE-ME');

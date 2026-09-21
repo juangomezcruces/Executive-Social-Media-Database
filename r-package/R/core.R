@@ -7,7 +7,7 @@ REPO <- "juangomezcruces/Executive-Social-Media-Database"
 #' variable. `scripts/set_api_url.py` rewrites this line, the Python package
 #' and the web app together, so the three clients cannot drift apart.
 #' @noRd
-API_BASE <- "https://esmd-api.REPLACE-ME.workers.dev/v1"
+API_BASE <- "https://esmd-api.esmd.workers.dev/v1"
 
 #' Seconds a cached manifest is trusted before re-checking for a new release.
 #' @noRd

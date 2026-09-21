@@ -16,7 +16,7 @@ compatibility_date = "2026-09-01"
 # libsql:// scheme is the same host over HTTPS and the client rewrites it, so
 # either spelling works. Not a secret on its own: the token is what grants
 # access, and that is set with `wrangler secret put TURSO_TOKEN`.
-TURSO_URL = "libsql://REPLACE-ME.turso.io"
+TURSO_URL = "libsql://esmd-juangocr.aws-eu-west-1.turso.io"
 
 # Holds the full tables (private/) and the precomputed aggregates (public/).
 # R2 egress is free, which is why full-file downloads cost nothing to serve.
