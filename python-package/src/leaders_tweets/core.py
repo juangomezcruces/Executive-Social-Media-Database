@@ -1,21 +1,29 @@
 """Core access functions for the Executive Social Media Database.
 
-The dataset is not bundled with this package. On first use the package reads a
-small manifest from the repository's latest GitHub release, then downloads the
-Parquet tables it names and caches them on disk under the release version. A
-new data release is picked up automatically; nothing here pins a tag.
+The dataset is not bundled with this package and is no longer a public file.
+On first use the package reads a small manifest from the project's API, then
+downloads the Parquet tables and caches them on disk under the release version.
+A new data release is picked up automatically; nothing here pins a tag.
+
+Downloading a full table needs an API key. Keys are free for research use --
+see the repository README -- and identify who is using the data, which is the
+whole reason the anonymous web API is capped at 100 rows a request. Set one
+with the ``LEADERS_TWEETS_KEY`` environment variable or :func:`set_api_key`.
 
     >>> import leaders_tweets as lt
+    >>> lt.set_api_key("esmd_...", persist=True)   # once per machine
     >>> lt.data_version()
-    'v1.0.0'
+    'v2.0.0'
     >>> lt.get_tweets("Modi", start="2022-01-01", end="2022-12-31").shape
     (..., 19)
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 import time
 import unicodedata
 from pathlib import Path
@@ -32,15 +40,73 @@ __all__ = [
     "data_version",
     "cache_dir",
     "clear_cache",
+    "api_key",
+    "set_api_key",
+    "MissingKeyError",
 ]
 
 REPO = "juangomezcruces/Executive-Social-Media-Database"
-MANIFEST_URL = f"https://github.com/{REPO}/releases/latest/download/manifest.json"
+
+#: The deployed Worker. Override for a local API with LEADERS_TWEETS_API.
+#: scripts/set_api_url.py rewrites this line, webapp/src/config.js and the R
+#: package together, so the three clients cannot drift apart.
+API_BASE = "https://esmd-api.REPLACE-ME.workers.dev/v1"
 
 #: how long a cached manifest is trusted before we re-check for a new release
 MANIFEST_TTL_SECONDS = 24 * 60 * 60
 
 _MEMO: dict[str, pd.DataFrame] = {}
+_SESSION_KEY: Optional[str] = None
+
+
+class MissingKeyError(RuntimeError):
+    """Raised when a full table is requested without an API key."""
+
+
+def api_base() -> str:
+    """Return the API root, without a trailing slash."""
+    return os.environ.get("LEADERS_TWEETS_API", API_BASE).rstrip("/")
+
+
+def _key_file() -> Path:
+    return cache_dir() / "api_key"
+
+
+def api_key() -> Optional[str]:
+    """Return the API key in effect, or ``None``.
+
+    Looked up in order: the key set by :func:`set_api_key` in this session, the
+    ``LEADERS_TWEETS_KEY`` environment variable, then a key persisted on this
+    machine by ``set_api_key(..., persist=True)``.
+    """
+    if _SESSION_KEY:
+        return _SESSION_KEY
+    from_env = os.environ.get("LEADERS_TWEETS_KEY")
+    if from_env:
+        return from_env.strip()
+    path = _key_file()
+    if path.exists():
+        stored = path.read_text().strip()
+        if stored:
+            return stored
+    return None
+
+
+def set_api_key(key: Optional[str], persist: bool = False) -> None:
+    """Set the API key for this session, optionally saving it on this machine.
+
+    ``persist=True`` writes the key to a file in the cache directory, readable
+    only by the current user. Pass ``None`` to clear both.
+    """
+    global _SESSION_KEY
+    _SESSION_KEY = key.strip() if key else None
+    if persist:
+        path = _key_file()
+        if _SESSION_KEY:
+            path.write_text(_SESSION_KEY + "\n")
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        elif path.exists():
+            path.unlink()
 
 
 # --------------------------------------------------------------------------
@@ -59,23 +125,51 @@ def cache_dir() -> Path:
 
 
 def clear_cache() -> None:
-    """Delete every cached manifest and table."""
+    """Delete every cached manifest and table.
+
+    A persisted API key is left alone: it is a credential, not a cache, and
+    silently throwing it away would be a surprising thing for this to do.
+    """
     import shutil
 
     _MEMO.clear()
-    shutil.rmtree(cache_dir(), ignore_errors=True)
+    root = cache_dir()
+    for child in root.iterdir():
+        if child == _key_file():
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def _download(url: str, dest: Path) -> Path:
+    """Fetch ``url`` to ``dest``, sending the API key if there is one."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=120) as response:
+    key = api_key()
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    with requests.get(url, stream=True, timeout=300, headers=headers) as response:
+        if response.status_code in (401, 403):
+            raise MissingKeyError(_KEY_HELP.format(status=response.status_code))
         response.raise_for_status()
         with tmp.open("wb") as fh:
             for chunk in response.iter_content(chunk_size=1 << 20):
                 fh.write(chunk)
     tmp.replace(dest)
     return dest
+
+
+_KEY_HELP = (
+    "the API rejected this request (HTTP {status}).\n\n"
+    "Full tables need an API key. They are free for research use -- ask at\n"
+    f"    https://github.com/{REPO}#api-keys\n"
+    "then either\n"
+    "    export LEADERS_TWEETS_KEY=esmd_...\n"
+    "or, once per machine,\n"
+    "    import leaders_tweets as lt; lt.set_api_key('esmd_...', persist=True)\n"
+    "If you already set one, it may have been revoked or mistyped."
+)
 
 
 def _manifest(refresh: bool = False) -> dict:
@@ -87,12 +181,20 @@ def _manifest(refresh: bool = False) -> dict:
     )
     if not fresh:
         try:
-            _download(MANIFEST_URL, path)
+            _download(f"{api_base()}/manifest", path)
         except Exception:
             if not path.exists():
                 raise
             # Offline with a cached copy: keep using it rather than failing.
     return json.loads(path.read_text())
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _table(name: str) -> pd.DataFrame:
@@ -103,7 +205,18 @@ def _table(name: str) -> pd.DataFrame:
     entry = manifest["tables"][name]
     local = cache_dir() / version / f"{name}.parquet"
     if not local.exists():
-        _download(entry["parquet"], local)
+        if api_key() is None:
+            raise MissingKeyError(_KEY_HELP.format(status=401))
+        _download(f"{api_base()}/download/{name}.parquet", local)
+        # The manifest names the digest, so a truncated or corrupted download
+        # is caught here rather than three lines into someone's analysis.
+        expected = (entry.get("parquet") or {}).get("sha256")
+        if expected and _sha256(local) != expected:
+            local.unlink(missing_ok=True)
+            raise OSError(
+                f"{name}.parquet did not match the digest in the manifest; "
+                "the download was discarded. Try again."
+            )
     frame = pd.read_parquet(local)
     _MEMO[name] = frame
     return frame

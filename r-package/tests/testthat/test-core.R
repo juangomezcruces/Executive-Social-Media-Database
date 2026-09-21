@@ -62,12 +62,12 @@ fixture_cache <- function() {
     dataset = "Executive Social Media Database",
     version = version,
     tables = list(
-      leaders   = list(parquet = "https://example.invalid/leaders.parquet",
-                       csv = "https://example.invalid/leaders.csv"),
-      tweets    = list(parquet = "https://example.invalid/tweets.parquet",
-                       csv = "https://example.invalid/tweets.csv"),
-      sentiment = list(parquet = "https://example.invalid/sentiment.parquet",
-                       csv = "https://example.invalid/sentiment.csv")
+      leaders   = list(rows = 5L, parquet = list(bytes = 0L, sha256 = ""),
+                       csv = list(bytes = 0L, sha256 = "")),
+      tweets    = list(rows = 6L, parquet = list(bytes = 0L, sha256 = ""),
+                       csv = list(bytes = 0L, sha256 = "")),
+      sentiment = list(rows = 2L, parquet = list(bytes = 0L, sha256 = ""),
+                       csv = list(bytes = 0L, sha256 = ""))
     )
   )
   writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE),
@@ -77,7 +77,12 @@ fixture_cache <- function() {
 
 with_fixtures <- function(code, mock_download = TRUE) {
   path <- fixture_cache()
-  withr::local_envvar(LEADERS_TWEETS_CACHE = path)
+  # A real key or API address in the developer's environment must not leak in.
+  withr::local_envvar(LEADERS_TWEETS_CACHE = path,
+                      LEADERS_TWEETS_KEY = NA,
+                      LEADERS_TWEETS_API = "https://api.invalid/v1")
+  withr::local_options(leaderstweets.api_key = NULL)
+  set_api_key(NULL)
   rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo)
   if (mock_download) {
     # Any fetch here means the cache lookup failed; surface it rather than
@@ -86,8 +91,10 @@ with_fixtures <- function(code, mock_download = TRUE) {
       .download = function(url, dest) stop("unexpected network fetch: ", url)
     )
   }
-  on.exit(rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo),
-          add = TRUE)
+  on.exit({
+    rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo)
+    set_api_key(NULL)
+  }, add = TRUE)
   force(code)
 }
 
@@ -196,4 +203,130 @@ test_that("a filtered query never falls through to the whole table", {
     expect_lt(nrow(get_tweets("modi")), nrow(get_tweets()))
     expect_error(get_tweets("Winston Churchill"))
   })
+})
+
+# ---------------------------------------------------------------------------
+# API keys -- the same contract as the Python package
+# ---------------------------------------------------------------------------
+
+test_that("a missing key raises something actionable", {
+  with_fixtures({
+    version <- data_version()
+    unlink(list.files(file.path(cache_dir(), version), full.names = TRUE))
+    rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo)
+    expect_error(get_tweets(), "LEADERS_TWEETS_KEY")
+    expect_error(get_tweets(), "set_api_key")
+    expect_error(get_tweets(), "#api-keys", fixed = TRUE)
+  })
+})
+
+test_that("the key is read from the environment", {
+  with_fixtures({
+    withr::local_envvar(LEADERS_TWEETS_KEY = "esmd_from_env")
+    expect_equal(api_key(), "esmd_from_env")
+  })
+})
+
+test_that("set_api_key wins over the environment and the option", {
+  with_fixtures({
+    withr::local_envvar(LEADERS_TWEETS_KEY = "esmd_from_env")
+    withr::local_options(leaderstweets.api_key = "esmd_from_option")
+    set_api_key("esmd_explicit")
+    expect_equal(api_key(), "esmd_explicit")
+    set_api_key(NULL)
+    expect_equal(api_key(), "esmd_from_option")
+  })
+})
+
+test_that("a persisted key survives clear_cache", {
+  # clear_cache() empties the same directory the key lives in; a key is a
+  # credential, not a cache, so it has to survive.
+  with_fixtures({
+    set_api_key("esmd_persisted", persist = TRUE)
+    set_api_key(NULL)  # as if this were a fresh session
+    clear_cache()
+    expect_equal(api_key(), "esmd_persisted")
+    set_api_key(NULL, persist = TRUE)
+    expect_null(api_key())
+  })
+})
+
+test_that("the download sends the key as a bearer token", {
+  with_fixtures({
+    set_api_key("esmd_secret")
+    seen <- NULL
+    local_mocked_bindings(
+      .download = function(url, dest) {
+        # Stand in for httr2: record what the real .download would have sent.
+        seen <<- list(url = url, key = api_key())
+        dest
+      }
+    )
+    leaderstweets:::.download("https://api.invalid/v1/download/tweets.parquet",
+                              tempfile())
+    expect_equal(seen$key, "esmd_secret")
+  }, mock_download = FALSE)
+})
+
+test_that("a corrupted download is discarded", {
+  with_fixtures({
+    # Whichever format this machine will actually fetch: with arrow installed
+    # the package prefers Parquet, without it the CSV. Both are verified.
+    fmt <- if (requireNamespace("arrow", quietly = TRUE)) "parquet" else "csv"
+    version <- data_version()
+    manifest <- jsonlite::fromJSON(file.path(cache_dir(), "manifest.json"),
+                                   simplifyVector = FALSE)
+    manifest$tables$tweets[[fmt]]$sha256 <- strrep("0", 64)
+    writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE),
+               file.path(cache_dir(), "manifest.json"))
+    local <- file.path(cache_dir(), version, paste0("tweets.", fmt))
+    unlink(local)
+    rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo)
+    set_api_key("esmd_valid")
+    local_mocked_bindings(
+      .download = function(url, dest) {
+        writeLines("not the table you asked for", dest)
+        dest
+      }
+    )
+    expect_error(get_tweets(), "digest")
+    expect_false(file.exists(local))
+  }, mock_download = FALSE)
+})
+
+test_that("the R digest matches Python's hexdigest byte for byte", {
+  # The two packages verify the same manifest, so they must compute the same
+  # string from the same bytes.
+  path <- tempfile()
+  writeBin(charToRaw("the quick brown fox"), path)
+  expect_equal(
+    leaderstweets:::.sha256_file(path),
+    # python: hashlib.sha256(b"the quick brown fox").hexdigest()
+    "9ecb36561341d18eb65484e833efea61edc74b84cf5e6ae1b81c63533e25fc8f"
+  )
+})
+
+test_that("a download whose digest matches is kept", {
+  # The mirror of the corruption test: the check must not reject a good file.
+  # It did, once -- openssl returns a classed object and identical() compared
+  # the class too, so every honest download looked corrupt.
+  with_fixtures({
+    fmt <- if (requireNamespace("arrow", quietly = TRUE)) "parquet" else "csv"
+    version <- data_version()
+    local <- file.path(cache_dir(), version, paste0("tweets.", fmt))
+    good <- readBin(local, "raw", file.size(local))
+    manifest <- jsonlite::fromJSON(file.path(cache_dir(), "manifest.json"),
+                                   simplifyVector = FALSE)
+    manifest$tables$tweets[[fmt]]$sha256 <- leaderstweets:::.sha256_file(local)
+    writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE),
+               file.path(cache_dir(), "manifest.json"))
+    unlink(local)
+    rm(list = ls(leaderstweets:::.memo), envir = leaderstweets:::.memo)
+    set_api_key("esmd_valid")
+    local_mocked_bindings(
+      .download = function(url, dest) { writeBin(good, dest); dest }
+    )
+    expect_equal(nrow(get_tweets()), 6L)
+    expect_true(file.exists(local))
+  }, mock_download = FALSE)
 })

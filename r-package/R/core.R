@@ -2,8 +2,12 @@
 "_PACKAGE"
 
 REPO <- "juangomezcruces/Executive-Social-Media-Database"
-MANIFEST_URL <- paste0("https://github.com/", REPO,
-                       "/releases/latest/download/manifest.json")
+
+#' The deployed Worker. Override with the `LEADERS_TWEETS_API` environment
+#' variable. `scripts/set_api_url.py` rewrites this line, the Python package
+#' and the web app together, so the three clients cannot drift apart.
+#' @noRd
+API_BASE <- "https://esmd-api.REPLACE-ME.workers.dev/v1"
 
 #' Seconds a cached manifest is trusted before re-checking for a new release.
 #' @noRd
@@ -11,6 +15,16 @@ MANIFEST_TTL_SECONDS <- 24 * 60 * 60
 
 # In-session memo so repeated calls do not re-read from disk.
 .memo <- new.env(parent = emptyenv())
+
+# The key set by set_api_key() for this session.
+.session <- new.env(parent = emptyenv())
+
+#' The API root, without a trailing slash
+#' @noRd
+.api_base <- function() {
+  base <- Sys.getenv("LEADERS_TWEETS_API", unset = API_BASE)
+  sub("/+$", "", base)
+}
 
 # ---------------------------------------------------------------------------
 # cache plumbing
@@ -36,7 +50,9 @@ cache_dir <- function() {
 #' Empty the local data cache
 #'
 #' Deletes every cached manifest and table. The next call to [load_leaders()],
-#' [get_tweets()] or [get_sentiment()] downloads them again.
+#' [get_tweets()] or [get_sentiment()] downloads them again. A key saved by
+#' `set_api_key(persist = TRUE)` is left alone: it is a credential, not a
+#' cache, and throwing it away here would be a surprising thing to do.
 #'
 #' @return `NULL`, invisibly.
 #' @examples
@@ -46,36 +62,149 @@ cache_dir <- function() {
 #' @export
 clear_cache <- function() {
   rm(list = ls(.memo), envir = .memo)
-  unlink(cache_dir(), recursive = TRUE)
+  keep <- .key_file()
+  for (path in list.files(cache_dir(), full.names = TRUE, all.files = TRUE,
+                          no.. = TRUE)) {
+    if (!identical(normalizePath(path, mustWork = FALSE),
+                   normalizePath(keep, mustWork = FALSE))) {
+      unlink(path, recursive = TRUE)
+    }
+  }
   invisible(NULL)
 }
 
-#' Download a URL to a local path
+# ---------------------------------------------------------------------------
+# API keys
+# ---------------------------------------------------------------------------
+
+#' @noRd
+.key_file <- function() file.path(cache_dir(), "api_key")
+
+#' Message shown whenever the API refuses a request for lack of a key
+#' @noRd
+.key_help <- function(status) {
+  paste0(
+    "the API rejected this request (HTTP ", status, ").\n\n",
+    "Full tables need an API key. They are free for research use -- ask at\n",
+    "    https://github.com/", REPO, "#api-keys\n",
+    "then either\n",
+    "    Sys.setenv(LEADERS_TWEETS_KEY = \"esmd_...\")\n",
+    "or, once per machine,\n",
+    "    set_api_key(\"esmd_...\", persist = TRUE)\n",
+    "If you already set one, it may have been revoked or mistyped."
+  )
+}
+
+#' The API key in effect
+#'
+#' Looked up in order: the key set by [set_api_key()] in this session, the
+#' `leaderstweets.api_key` option, the `LEADERS_TWEETS_KEY` environment
+#' variable, then a key saved on this machine by
+#' `set_api_key(persist = TRUE)`.
+#'
+#' @return A length-one character vector, or `NULL` when no key is set.
+#' @examples
+#' api_key()
+#' @seealso [set_api_key()]
+#' @export
+api_key <- function() {
+  if (!is.null(.session$key)) return(.session$key)
+  from_option <- getOption("leaderstweets.api_key", default = NULL)
+  if (!is.null(from_option) && nzchar(from_option)) return(trimws(from_option))
+  from_env <- Sys.getenv("LEADERS_TWEETS_KEY", unset = "")
+  if (nzchar(from_env)) return(trimws(from_env))
+  path <- .key_file()
+  if (file.exists(path)) {
+    stored <- trimws(paste(readLines(path, warn = FALSE), collapse = ""))
+    if (nzchar(stored)) return(stored)
+  }
+  NULL
+}
+
+#' Set the API key
+#'
+#' Sets the key for this session and, with `persist = TRUE`, saves it in the
+#' cache directory readable only by the current user. Pass `NULL` to clear it.
+#'
+#' @param key The key, as issued, or `NULL` to clear.
+#' @param persist Whether to save the key on this machine for future sessions.
+#'
+#' @return `NULL`, invisibly.
+#' @examples
+#' \dontrun{
+#' set_api_key("esmd_...", persist = TRUE)
+#' }
+#' @seealso [api_key()]
+#' @export
+set_api_key <- function(key, persist = FALSE) {
+  .session$key <- if (is.null(key) || !nzchar(key)) NULL else trimws(key)
+  if (isTRUE(persist)) {
+    path <- .key_file()
+    if (is.null(.session$key)) {
+      unlink(path)
+    } else {
+      writeLines(.session$key, path)
+      Sys.chmod(path, mode = "0600")
+    }
+  }
+  invisible(NULL)
+}
+
+#' Download a URL to a local path, sending the API key if there is one
 #' @noRd
 .download <- function(url, dest) {
   dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
   tmp <- paste0(dest, ".part")
-  httr2::req_perform(
-    httr2::req_timeout(httr2::request(url), 300),
-    path = tmp
-  )
+  request <- httr2::req_timeout(httr2::request(url), 300)
+  key <- api_key()
+  if (!is.null(key)) {
+    request <- httr2::req_headers(request, Authorization = paste("Bearer", key))
+  }
+  # Handle the 401 ourselves so the user gets instructions rather than a stack
+  # trace about an HTTP status.
+  response <- httr2::req_perform(httr2::req_error(request, is_error = function(r) FALSE),
+                                 path = tmp)
+  status <- httr2::resp_status(response)
+  if (status %in% c(401L, 403L)) {
+    unlink(tmp)
+    stop(.key_help(status), call. = FALSE)
+  }
+  if (status >= 400L) {
+    unlink(tmp)
+    stop("the API returned HTTP ", status, " for ", url, call. = FALSE)
+  }
   file.rename(tmp, dest)
   dest
+}
+
+#' SHA-256 of a file as a lowercase hex string, matching Python's hexdigest
+#'
+#' Streams through a connection rather than reading the file into memory: the
+#' tweets table is over 50 MB.
+#' @noRd
+.sha256_file <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con), add = TRUE)
+  # paste0(), not as.character(): openssl returns a classed "hash" object and
+  # as.character() keeps that class, which makes identical() against a plain
+  # string from the manifest false for every file, corrupt or not.
+  paste0(openssl::sha256(con))
 }
 
 #' Read the release manifest, refreshing it when stale
 #' @noRd
 .manifest <- function(refresh = FALSE) {
   path <- file.path(cache_dir(), "manifest.json")
+  url <- paste0(.api_base(), "/manifest")
   age <- if (file.exists(path)) {
     as.numeric(difftime(Sys.time(), file.info(path)$mtime, units = "secs"))
   } else Inf
   if (refresh || age > MANIFEST_TTL_SECONDS) {
-    ok <- tryCatch({ .download(MANIFEST_URL, path); TRUE },
+    ok <- tryCatch({ .download(url, path); TRUE },
                    error = function(e) FALSE)
     # Offline with a cached copy: keep using it rather than failing.
     if (!ok && !file.exists(path)) {
-      stop("could not download the dataset manifest from ", MANIFEST_URL,
+      stop("could not download the dataset manifest from ", url,
            " and no cached copy is available.", call. = FALSE)
     }
   }
@@ -96,7 +225,21 @@ clear_cache <- function() {
   # fall back to the CSV asset when it is not installed.
   fmt <- if (has_arrow) "parquet" else "csv"
   local <- file.path(cache_dir(), version, paste0(name, ".", fmt))
-  if (!file.exists(local)) .download(entry[[fmt]], local)
+  if (!file.exists(local)) {
+    if (is.null(api_key())) stop(.key_help(401L), call. = FALSE)
+    .download(paste0(.api_base(), "/download/", name, ".", fmt), local)
+    # The manifest names a digest per file, so a truncated download is caught
+    # here rather than three lines into someone's analysis.
+    expected <- entry[[fmt]][["sha256"]]
+    if (!is.null(expected) && nzchar(expected)) {
+      got <- .sha256_file(local)
+      if (!identical(got, expected)) {
+        unlink(local)
+        stop(name, ".", fmt, " did not match the digest in the manifest; the ",
+             "download was discarded. Try again.", call. = FALSE)
+      }
+    }
+  }
 
   out <- if (has_arrow) {
     tibble::as_tibble(arrow::read_parquet(local))
@@ -162,9 +305,9 @@ clear_cache <- function() {
 
 #' Which data release is in use
 #'
-#' Reports the GitHub release tag that the cached tables came from. The tag is
-#' read from the manifest attached to the repository's latest release, so it
-#' changes on its own when new data is published.
+#' Reports the release tag that the cached tables came from. The tag is read
+#' from the manifest the API publishes, so it changes on its own when new data
+#' is released. Reading the manifest needs no API key.
 #'
 #' @return A length-one character vector, for example `"v1.0.0"`.
 #' @examples

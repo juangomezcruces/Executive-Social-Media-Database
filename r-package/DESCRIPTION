@@ -1,15 +1,17 @@
 Package: leaderstweets
 Type: Package
 Title: Access the Executive Social Media Database
-Version: 1.0.0
+Version: 2.0.0
 Authors@R: person("Juan", "Gomez Cruces", role = c("aut", "cre"),
                   email = "juansalvadorgc@gmail.com")
 Description: Programmatic access to the Executive Social Media Database, a
-    collection of 327,900 tweets and their engagement metrics from 38 heads of
-    government and state across 22 countries between 2010 and 2023. Tables are
-    downloaded from the project's latest GitHub release and cached locally, so
-    a new data release is picked up without updating this package. The function
-    names and arguments mirror the companion Python package 'leaders_tweets'.
+    collection of 498,605 tweets and their engagement metrics from 62 heads of
+    government and state across 34 countries between 2009 and 2023. Tables are
+    downloaded from the project's API and cached locally, so a new data release
+    is picked up without updating this package. Downloading a full table needs
+    a free API key, which the project issues to researchers on request. The
+    function names and arguments mirror the companion Python package
+    'leaders_tweets'.
 License: MIT + file LICENSE
 Encoding: UTF-8
 URL: https://github.com/juangomezcruces/Executive-Social-Media-Database
@@ -18,6 +20,7 @@ Depends: R (>= 4.0)
 Imports:
     httr2 (>= 1.0.0),
     jsonlite,
+    openssl,
     rappdirs,
     readr,
     tibble

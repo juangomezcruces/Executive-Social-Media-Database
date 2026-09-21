@@ -1,0 +1,28 @@
+# Cloudflare Worker configuration.
+#
+# Nothing secret belongs in this file — it is committed. The database token is
+# a Worker secret (`wrangler secret put TURSO_TOKEN`), API keys live in the
+# database as SHA-256 hashes, and your Cloudflare token stays in your shell or
+# in `wrangler login`.
+#
+# api/DEPLOY.md is the runbook; this file is only the wiring.
+
+name = "esmd-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# The database's hostname, as `turso db show esmd --url` prints it. The
+# libsql:// scheme is the same host over HTTPS and the client rewrites it, so
+# either spelling works. Not a secret on its own: the token is what grants
+# access, and that is set with `wrangler secret put TURSO_TOKEN`.
+TURSO_URL = "libsql://REPLACE-ME.turso.io"
+
+# Holds the full tables (private/) and the precomputed aggregates (public/).
+# R2 egress is free, which is why full-file downloads cost nothing to serve.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "esmd-data"
+
+[observability]
+enabled = true

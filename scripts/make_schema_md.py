@@ -17,7 +17,8 @@ dimension table; `tweets` and `sentiment` both join back to it on `leader_id`,
 and `sentiment` joins to `tweets` on `tweet_uid`.
 
 Every table is published as Parquet (canonical, typed) and CSV (readable,
-diffable) on each tagged release.
+diffable). Both are downloadable in full with a free API key; see the
+repository README.
 
 ## A note on tweet ids
 
@@ -43,9 +44,15 @@ def main() -> None:
     args = ap.parse_args()
 
     schema = json.loads((args.data / "schema.json").read_text())
+    # The release version comes from the manifest, not from schema.json: the
+    # manifest is what every client reads and what defines a release, and a
+    # release can ship the same tables under a new version -- v2.0.0 changed
+    # how the data is reached, not a single row of it.
+    manifest_path = args.data / "manifest.json"
+    version = (json.loads(manifest_path.read_text()).get("version")
+               if manifest_path.exists() else schema.get("version", "unreleased"))
     lines = [INTRO]
-    lines.append(f"*Generated from `data/schema.json` for release "
-                 f"`{schema.get('version', 'unreleased')}`.*\n")
+    lines.append(f"*Generated from `data/schema.json` for release `{version}`.*\n")
 
     for name, table in schema["tables"].items():
         lines.append(f"## `{name}`\n")

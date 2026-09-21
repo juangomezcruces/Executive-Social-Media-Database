@@ -1,9 +1,22 @@
-# The canonical tables are Parquet and ARE committed (the web app reads them
-# same-origin from GitHub Pages). The CSV copies are release assets only:
-# tweets.csv is 118 MB, over GitHub's hard 100 MB per-file limit.
+# The tables are NOT in this repository any more.
+#
+# Until v1.3.0 the Parquet files were committed and the CSVs were attached to
+# releases, which meant anyone could take the whole corpus without asking. From
+# v2.0.0 the tables live in a private R2 bucket behind the API: browsing is
+# capped at 100 rows a request and whole tables need a free key. Committing a
+# table here would undo all of that in one push, so they are ignored, and the
+# Pages workflow fails the build if one ever reaches the site.
+#
+# data/manifest.json and data/schema.json stay tracked: they document the
+# release and contain no data.
+data/*.parquet
 data/*.csv
 data/*.gz
 data2/
+
+# Generated import files and aggregates for the API (149 MB of SQL).
+api/build/
+d1/
 
 # Intermediate export output
 scripts/__pycache__/
@@ -13,6 +26,13 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Never commit a Cloudflare token or an API key.
+.dev.vars
+.env
+*.key
+wrangler.toml.local
+.wrangler/
 
 # R
 .Rhistory

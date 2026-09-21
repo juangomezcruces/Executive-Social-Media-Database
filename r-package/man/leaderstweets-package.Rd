@@ -6,7 +6,7 @@
 \alias{leaderstweets-package}
 \title{leaderstweets: Access the Executive Social Media Database}
 \description{
-Programmatic access to the Executive Social Media Database, a collection of 327,900 tweets and their engagement metrics from 38 heads of government and state across 22 countries between 2010 and 2023. Tables are downloaded from the project's latest GitHub release and cached locally, so a new data release is picked up without updating this package. The function names and arguments mirror the companion Python package 'leaders_tweets'.
+Programmatic access to the Executive Social Media Database, a collection of 498,605 tweets and their engagement metrics from 62 heads of government and state across 34 countries between 2009 and 2023. Tables are downloaded from the project's API and cached locally, so a new data release is picked up without updating this package. Downloading a full table needs a free API key, which the project issues to researchers on request. The function names and arguments mirror the companion Python package 'leaders_tweets'.
 }
 \seealso{
 Useful links:

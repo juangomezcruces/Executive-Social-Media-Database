@@ -5,7 +5,8 @@ dimension table; `tweets` and `sentiment` both join back to it on `leader_id`,
 and `sentiment` joins to `tweets` on `tweet_uid`.
 
 Every table is published as Parquet (canonical, typed) and CSV (readable,
-diffable) on each tagged release.
+diffable). Both are downloadable in full with a free API key; see the
+repository README.
 
 ## A note on tweet ids
 
@@ -22,7 +23,7 @@ Rows are therefore keyed on **`tweet_uid`**, a BLAKE2b-64 digest of
 for that leader -- check it before using ids to rehydrate against the X API.
 
 
-*Generated from `data/schema.json` for release `v1.3.0`.*
+*Generated from `data/schema.json` for release `v2.0.0`.*
 
 ## `leaders`
 

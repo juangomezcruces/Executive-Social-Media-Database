@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Executive Social Media Database</title>
-<meta name="description" content="Query 327,900 tweets from 38 heads of government and state, 2010-2023, entirely in your browser.">
+<meta name="description" content="Search and chart tweets from heads of government and state, 2010-2023. Free API keys for researchers.">
 <link rel="stylesheet" href="./src/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
 </head>
@@ -15,10 +15,10 @@
     <h1>Executive Social Media Database</h1>
     <p class="lede">
       <span id="lede-counts">Tweets and engagement metrics from heads of
-      government and state</span>. Every query below runs in your browser
-      &mdash; there is no server.
+      government and state</span>. Browse and chart them here; the full tables
+      are free for research use with an API key.
     </p>
-    <p class="meta" id="release-meta" aria-live="polite">Loading dataset&hellip;</p>
+    <p class="meta" id="release-meta" aria-live="polite">Loading&hellip;</p>
   </div>
 </header>
 
@@ -67,11 +67,11 @@
       </div>
       <div class="field">
         <label for="f-start">From</label>
-        <input type="date" id="f-start" min="2010-01-01" max="2023-06-20">
+        <input type="date" id="f-start">
       </div>
       <div class="field">
         <label for="f-end">To</label>
-        <input type="date" id="f-end" min="2010-01-01" max="2023-06-20">
+        <input type="date" id="f-end">
       </div>
       <div class="field">
         <label for="f-engagement">Min engagement</label>
@@ -94,6 +94,12 @@
       </div>
     </form>
   </section>
+
+  <p class="note" id="scope-note" hidden>
+    Text search and minimum engagement filter the results table only. The
+    summary and charts below reflect the leader, country, date and reply
+    filters.
+  </p>
 
   <section class="stats" id="stats" aria-label="Summary of the current selection"></section>
 
@@ -120,7 +126,8 @@
       <table id="results">
         <thead>
           <tr>
-            <th scope="col" data-sort="leader" aria-sort="none"><button type="button">Leader</button></th>
+            <th scope="col" data-sort="leader" aria-sort="none"
+                title="Sorts by leader identifier, which is the surname"><button type="button">Leader</button></th>
             <th scope="col" data-sort="created_at" aria-sort="descending"><button type="button">Date</button></th>
             <th scope="col">Text</th>
             <th scope="col" class="num" data-sort="retweet_count" aria-sort="none"><button type="button">RT</button></th>
@@ -134,18 +141,46 @@
       </table>
     </div>
     <nav class="pager" id="pager" aria-label="Results pages"></nav>
+    <p class="note" id="cap-note" hidden></p>
   </section>
 
-  <section class="panel" aria-labelledby="sql-heading">
+  <section class="panel" aria-labelledby="key-heading">
+    <h2 id="key-heading">API key</h2>
+    <p class="chart-note">
+      Browsing here is capped at 100 rows per request, which is enough to read
+      and chart the corpus but not to copy it. A key lifts that cap and unlocks
+      the complete tables. Keys are free for research use &mdash;
+      <a href="https://github.com/juangomezcruces/Executive-Social-Media-Database#api-keys">ask
+      for one</a>. It is stored in this browser only.
+    </p>
+    <form id="key-form" class="keyrow">
+      <label class="sr-only" for="key-input">API key</label>
+      <input type="password" id="key-input" placeholder="esmd_…" autocomplete="off"
+             spellcheck="false">
+      <button type="submit" class="btn btn--primary">Save key</button>
+      <button type="button" class="btn" id="key-clear" hidden>Forget key</button>
+    </form>
+    <p class="meta" id="key-status" aria-live="polite"></p>
+    <div class="downloads" id="downloads">
+      <span class="field-label">Full tables</span>
+      <button type="button" class="btn" data-table="tweets" data-format="parquet" disabled>tweets.parquet</button>
+      <button type="button" class="btn" data-table="tweets" data-format="csv" disabled>tweets.csv</button>
+      <button type="button" class="btn" data-table="leaders" data-format="csv" disabled>leaders.csv</button>
+      <button type="button" class="btn" data-table="sentiment" data-format="csv" disabled>sentiment.csv</button>
+    </div>
+  </section>
+
+  <section class="panel" id="sql-panel" aria-labelledby="sql-heading">
     <h2 id="sql-heading">SQL console</h2>
     <p class="chart-note">
-      DuckDB running in your browser. Tables:
-      <code>'tweets.parquet'</code>, <code>'leaders.parquet'</code>,
-      <code>'sentiment.parquet'</code>.
+      Read-only <code>SELECT</code> against the live database, 1,000 rows per
+      query. Tables: <code>tweets</code>, <code>leaders</code>.
+      <code>sentiment</code> is available as a download rather than a table.
     </p>
-    <form id="sql-form">
+    <p class="note" id="sql-locked">Add an API key above to use the console.</p>
+    <form id="sql-form" hidden>
       <textarea id="sql-input" rows="3" spellcheck="false">SELECT country, COUNT(*) AS tweets, ROUND(AVG(engagement)) AS mean_engagement
-FROM 'tweets.parquet' GROUP BY 1 ORDER BY 2 DESC;</textarea>
+FROM tweets GROUP BY 1 ORDER BY 2 DESC</textarea>
       <button type="submit" class="btn btn--primary">Run query</button>
     </form>
     <div class="table-scroll"><table id="sql-results"><thead></thead><tbody></tbody></table></div>

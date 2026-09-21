@@ -3,18 +3,25 @@
  *
  * Plain modules, no framework and no build step: the page is small enough that
  * a bundler would add a deploy dependency without buying anything.
+ *
+ * The page is a thin client. Rows come from the API, capped at 100 per request
+ * for anonymous visitors; the stat row and both charts are computed in the
+ * browser from one precomputed monthly object, so moving a filter costs the
+ * database nothing.
  */
 
 import {
-  dataVersion, queryLeaders, queryTweets, queryVolume,
-  queryEngagementByLeader, querySummary, runSql,
+  LIMITS, ApiError,
+  getManifest, getSummary, getLeaders,
+  queryTweets, queryCount, queryAggregates, hasUnchartableFilter,
+  runSql, downloadTable, getKey, setKey, hasKey,
 } from './data.js';
 
 const PAGE_SIZE = 50;
 
 /**
  * A searchable checkbox dropdown. Built by hand rather than pulled in as a
- * dependency: with 60 leaders a native <select multiple> is unusable on a
+ * dependency: with 62 leaders a native <select multiple> is unusable on a
  * phone, and this is about eighty lines.
  */
 function createMultiSelect(root, onChange) {
@@ -110,12 +117,21 @@ const els = {
   engagement: document.getElementById('f-engagement'),
   search: document.getElementById('f-search'),
   stats: document.getElementById('stats'),
+  scopeNote: document.getElementById('scope-note'),
   volNote: document.getElementById('vol-note'),
   resultCount: document.getElementById('result-count'),
   tbody: document.querySelector('#results tbody'),
   pager: document.getElementById('pager'),
+  capNote: document.getElementById('cap-note'),
+  keyForm: document.getElementById('key-form'),
+  keyInput: document.getElementById('key-input'),
+  keyStatus: document.getElementById('key-status'),
+  keyClear: document.getElementById('key-clear'),
+  downloads: document.getElementById('downloads'),
+  sqlPanel: document.getElementById('sql-panel'),
   sqlForm: document.getElementById('sql-form'),
   sqlInput: document.getElementById('sql-input'),
+  sqlLocked: document.getElementById('sql-locked'),
   sqlHead: document.querySelector('#sql-results thead'),
   sqlBody: document.querySelector('#sql-results tbody'),
 };
@@ -125,10 +141,30 @@ let charts = { volume: null, engagement: null };
 let sort = { column: 'created_at', direction: 'desc' };
 let leaderSelect = null;
 let countrySelect = null;
+let leaderName = new Map();
+let inFlight = null;
+/**
+ * The last count, keyed by the filters that produced it. Counting is the one
+ * request that can read up to 10,001 rows, and neither turning a page nor
+ * changing the sort changes the answer — so it is asked once per filter set,
+ * not once per view.
+ */
+let lastCount = { signature: null, value: null };
 
 const num = new Intl.NumberFormat('en-US');
-const fmtDate = (value) =>
-  new Date(value).toISOString().slice(0, 10);
+const fmtDate = (value) => String(value ?? '').slice(0, 10);
+/** "2019-03" → "Mar 2019", for axis labels and the stat row. */
+const fmtMonth = (value) => {
+  if (!value) return '';
+  const [year, month] = value.split('-');
+  return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct',
+    'Nov', 'Dec'][Number(month) - 1]} ${year}`;
+};
+
+/** Ceilings depend on whether a key is present. */
+const ceilings = () => (hasKey()
+  ? { rows: LIMITS.keyedRows, offset: LIMITS.keyedOffset }
+  : { rows: LIMITS.rows, offset: LIMITS.offset });
 
 /** Read the token values the charts should paint with, live from the CSS. */
 function tokens() {
@@ -200,15 +236,13 @@ function axis(t, { numeric = true, showGrid = true } = {}) {
 
 function drawVolume(rows) {
   const t = tokens();
-  const labels = rows.map((r) => fmtDate(r.month).slice(0, 7));
-  const data = rows.map((r) => r.tweets);
   charts.volume?.destroy();
   charts.volume = new Chart(document.getElementById('chart-volume'), {
     type: 'line',
     data: {
-      labels,
+      labels: rows.map((r) => r.month),
       datasets: [{
-        data,
+        data: rows.map((r) => r.tweets),
         borderColor: t.series,
         backgroundColor: t.seriesSoft,
         borderWidth: 2,
@@ -234,6 +268,10 @@ function drawVolume(rows) {
       },
     },
   });
+  // Months are the x values; the tooltip title spells them out in full.
+  charts.volume.options.plugins.tooltip.callbacks.title =
+    (items) => fmtMonth(items[0].label);
+  charts.volume.update('none');
 }
 
 function drawEngagement(rows) {
@@ -268,21 +306,22 @@ function drawEngagement(rows) {
 // rendering
 // --------------------------------------------------------------------------
 
-function renderStats(summary) {
-  const span = summary.tweets
-    ? `${fmtDate(summary.first_date)} to ${fmtDate(summary.last_date)}`
+function renderStats(totals) {
+  const span = totals.tweets
+    ? `${fmtMonth(totals.firstMonth)} to ${fmtMonth(totals.lastMonth)}`
     : 'no matching tweets';
-  const mean = summary.tweets
-    ? Math.round(summary.engagement / summary.tweets)
+  const mean = totals.tweets ? Math.round(totals.engagement / totals.tweets) : 0;
+  const replyShare = totals.tweets
+    ? Math.round((totals.replies / totals.tweets) * 100)
     : 0;
-  const replyShare = summary.tweets
-    ? Math.round((summary.replies / summary.tweets) * 100)
-    : 0;
+  const replyLine = els.noReplies.checked
+    ? 'replies excluded'
+    : `${num.format(totals.replies)} replies (${replyShare}%)`;
   els.stats.innerHTML = `
-    <dl class="stat"><dt>Tweets</dt><dd>${num.format(summary.tweets)}<span class="sub">${span}</span></dd></dl>
-    <dl class="stat"><dt>Leaders</dt><dd>${num.format(summary.leaders)}</dd></dl>
-    <dl class="stat"><dt>Total engagement</dt><dd>${num.format(summary.engagement || 0)}</dd></dl>
-    <dl class="stat"><dt>Mean per tweet</dt><dd>${num.format(mean)}<span class="sub">${num.format(summary.replies || 0)} replies (${replyShare}%)</span></dd></dl>
+    <dl class="stat"><dt>Tweets</dt><dd>${num.format(totals.tweets)}<span class="sub">${span}</span></dd></dl>
+    <dl class="stat"><dt>Leaders</dt><dd>${num.format(totals.leaders)}</dd></dl>
+    <dl class="stat"><dt>Total engagement</dt><dd>${num.format(totals.engagement)}</dd></dl>
+    <dl class="stat"><dt>Mean per tweet</dt><dd>${num.format(mean)}<span class="sub">${replyLine}</span></dd></dl>
   `;
 }
 
@@ -298,40 +337,65 @@ function paintSortHeaders() {
   }
 }
 
-function renderTable({ rows, total }) {
+function renderTable(rows) {
   if (!rows.length) {
-    els.tbody.innerHTML = '<tr><td class="empty" colspan="8">No tweets match these filters.</td></tr>';
-  } else {
-    els.tbody.innerHTML = rows.map((r) => `
-      <tr>
-        <td class="leader">${escapeHtml(r.leader)}</td>
-        <td class="when">${fmtDate(r.created_at)}</td>
-        <td class="text">${r.is_reply ? '<span class="tag">reply</span> ' : ''}${escapeHtml(r.text)}</td>
-        <td class="num">${num.format(r.retweet_count)}</td>
-        <td class="num">${num.format(r.reply_count)}</td>
-        <td class="num">${num.format(r.like_count)}</td>
-        <td class="num">${num.format(r.quote_count)}</td>
-        <td class="num">${num.format(r.engagement)}</td>
-      </tr>`).join('');
+    els.tbody.innerHTML =
+      '<tr><td class="empty" colspan="8">No tweets match these filters.</td></tr>';
+    return;
   }
+  els.tbody.innerHTML = rows.map((r) => `
+    <tr>
+      <td class="leader">${escapeHtml(leaderName.get(r.leader_id) || r.leader_id)}</td>
+      <td class="when">${fmtDate(r.created_at)}</td>
+      <td class="text">${r.is_reply ? '<span class="tag">reply</span> ' : ''}${
+        r.is_deleted ? '<span class="tag tag--warn">deleted</span> ' : ''
+      }${escapeHtml(r.text)}</td>
+      <td class="num">${num.format(r.retweet_count)}</td>
+      <td class="num">${num.format(r.reply_count)}</td>
+      <td class="num">${num.format(r.like_count)}</td>
+      <td class="num">${num.format(r.quote_count)}</td>
+      <td class="num">${num.format(r.engagement)}</td>
+    </tr>`).join('');
+}
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const from = total ? page * PAGE_SIZE + 1 : 0;
-  const to = Math.min(total, (page + 1) * PAGE_SIZE);
-  els.resultCount.textContent = total
-    ? `${num.format(from)}–${num.format(to)} of ${num.format(total)}`
+/**
+ * Paging, bounded by the same offset ceiling the Worker enforces. Walking the
+ * corpus 50 rows at a time is exactly what the cap exists to prevent, so the
+ * pager stops where the API does and says why instead of erroring.
+ */
+function renderPager({ count, exact }, shown) {
+  const { offset: maxOffset } = ceilings();
+  const from = count ? page * PAGE_SIZE + 1 : 0;
+  const to = page * PAGE_SIZE + shown;
+  const total = exact ? num.format(count) : `${num.format(count)}+`;
+  els.resultCount.textContent = count
+    ? `${num.format(from)}–${num.format(to)} of ${total}`
     : '0 tweets';
+
+  const lastPageByCount = exact ? Math.ceil(count / PAGE_SIZE) - 1 : Infinity;
+  const lastPageByCap = Math.floor(maxOffset / PAGE_SIZE);
+  const lastPage = Math.min(lastPageByCount, lastPageByCap);
+  const pages = exact ? Math.ceil(count / PAGE_SIZE) : null;
 
   els.pager.innerHTML = `
     <button class="btn" data-step="-1" ${page === 0 ? 'disabled' : ''}>Previous</button>
-    <span class="page-of">Page ${num.format(page + 1)} of ${num.format(pages)}</span>
-    <button class="btn" data-step="1" ${page + 1 >= pages ? 'disabled' : ''}>Next</button>
+    <span class="page-of">Page ${num.format(page + 1)}${pages ? ` of ${num.format(pages)}` : ''}</span>
+    <button class="btn" data-step="1" ${page >= lastPage ? 'disabled' : ''}>Next</button>
   `;
   for (const button of els.pager.querySelectorAll('button')) {
     button.addEventListener('click', () => {
       page += Number(button.dataset.step);
       refresh({ resetPage: false, chartsToo: false });
     });
+  }
+
+  const atCap = page >= lastPageByCap && lastPageByCount > lastPageByCap;
+  els.capNote.hidden = !atCap;
+  if (atCap) {
+    els.capNote.textContent = hasKey()
+      ? `Paging stops at ${num.format(maxOffset)} rows. Download the full table instead.`
+      : `Anonymous browsing stops here, at ${num.format(maxOffset + PAGE_SIZE)} rows. `
+        + 'A free API key raises the ceiling and unlocks the full tables.';
   }
 }
 
@@ -341,24 +405,26 @@ function escapeHtml(value) {
   ));
 }
 
+/** One place to turn an ApiError into something a person can act on. */
+function describeError(error) {
+  const hint = error instanceof ApiError && error.hint ? ` ${error.hint}` : '';
+  return `${error.message}${hint}`;
+}
+
 // --------------------------------------------------------------------------
 // orchestration
 // --------------------------------------------------------------------------
 
 /** Human-readable summary of what the charts are currently showing. */
-function describeSelection({ leaders, countries, excludeReplies }) {
+function describeSelection({ leaders, countries, excludeReplies }, totals) {
   const parts = [];
-  if (leaders.length === 1) {
-    parts.push(document.querySelector(
-      `#f-leader .multi-option input[value="${CSS.escape(leaders[0])}"]`
-    )?.closest('.multi-option')?.textContent.trim() || '1 leader');
-  } else if (leaders.length > 1) {
-    parts.push(`${leaders.length} leaders`);
-  }
+  if (leaders.length === 1) parts.push(leaderName.get(leaders[0]) || '1 leader');
+  else if (leaders.length > 1) parts.push(`${leaders.length} leaders`);
   if (countries.length === 1) parts.push(countries[0]);
   else if (countries.length > 1) parts.push(`${countries.length} countries`);
   if (!parts.length) parts.push('All leaders');
   if (excludeReplies) parts.push('excluding replies');
+  if (totals?.partialMonths) parts.push('whole months only');
   return parts.join(' · ');
 }
 
@@ -366,30 +432,114 @@ async function refresh({ resetPage = true, chartsToo = true } = {}) {
   if (resetPage) page = 0;
   const filters = currentFilters();
 
-  els.volNote.textContent = describeSelection(filters);
+  inFlight?.abort();
+  const controller = new AbortController();
+  inFlight = controller;
+  const { signal } = controller;
 
-  const work = [
-    queryTweets(filters, {
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
-      sort: sort.column,
-      direction: sort.direction,
-    }).then(renderTable),
-  ];
+  // The charts and the stat row are pure arithmetic over data already in the
+  // browser, so they repaint immediately, before the network round trip.
   if (chartsToo) {
-    work.push(
-      querySummary(filters).then(renderStats),
-      queryVolume(filters).then(drawVolume),
-      queryEngagementByLeader(filters).then(drawEngagement),
-    );
+    try {
+      const { monthly, byLeader, totals } = await queryAggregates(filters);
+      renderStats(totals);
+      drawVolume(monthly);
+      drawEngagement(
+        byLeader.filter((l) => l.tweets >= 25)
+          .sort((a, b) => b.mean_engagement - a.mean_engagement)
+          .slice(0, 15)
+      );
+      els.volNote.textContent = describeSelection(filters, totals);
+    } catch (error) {
+      els.stats.innerHTML =
+        `<dl class="stat"><dt>Error</dt><dd style="font-size:1rem">${escapeHtml(describeError(error))}</dd></dl>`;
+    }
   }
-  await Promise.all(work);
+
+  // Text search and minimum engagement cannot be applied to a monthly object
+  // with no text column. Rather than let the summary quietly disagree with the
+  // table, say which numbers each filter reaches.
+  els.scopeNote.hidden = !hasUnchartableFilter(filters);
+
+  els.tbody.setAttribute('aria-busy', 'true');
+  const signature = JSON.stringify(filters);
+  try {
+    const [tweets, count] = await Promise.all([
+      queryTweets(filters, {
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+        sort: sort.column,
+        direction: sort.direction,
+        signal,
+      }),
+      lastCount.signature === signature
+        ? Promise.resolve(lastCount.value)
+        : queryCount(filters, { signal }),
+    ]);
+    if (signal.aborted) return;
+    lastCount = { signature, value: count };
+    renderTable(tweets.rows);
+    renderPager(count, tweets.rows.length);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    els.tbody.innerHTML =
+      `<tr><td class="empty" colspan="8">${escapeHtml(describeError(error))}</td></tr>`;
+    els.resultCount.textContent = '';
+    els.pager.innerHTML = '';
+  } finally {
+    els.tbody.removeAttribute('aria-busy');
+  }
+}
+
+// --------------------------------------------------------------------------
+// keys
+// --------------------------------------------------------------------------
+
+/** Reflect the presence of a key across the three things it changes. */
+function paintKeyState() {
+  const on = hasKey();
+  els.keyStatus.textContent = on
+    ? 'A key is stored in this browser. Full tables and SQL are unlocked.'
+    : 'No key. Browsing is capped at 100 rows per request.';
+  els.keyStatus.dataset.on = String(on);
+  els.keyClear.hidden = !on;
+  els.keyInput.value = '';
+  els.keyInput.placeholder = on ? 'Replace the stored key…' : 'esmd_…';
+  els.sqlForm.hidden = !on;
+  els.sqlLocked.hidden = on;
+  els.downloads.querySelectorAll('button').forEach((b) => { b.disabled = !on; });
+  if (!on) {
+    // Don't leave the previous key holder's results sitting under a locked form.
+    els.sqlHead.innerHTML = '';
+    els.sqlBody.innerHTML = '';
+  }
+}
+
+async function download(table, format, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Preparing…';
+  try {
+    const { blob, filename } = await downloadTable(table, format);
+    const url = URL.createObjectURL(blob);
+    const link = Object.assign(document.createElement('a'), { href: url, download: filename });
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    els.keyStatus.textContent = describeError(error);
+    els.keyStatus.dataset.on = 'false';
+  } finally {
+    button.textContent = original;
+    button.disabled = !hasKey();
+  }
 }
 
 /**
- * Wire up every listener. Called before the first query runs: if loading the
- * data fails, the controls must still respond rather than falling through to
- * native form submission, which would reload the page.
+ * Wire up every listener. Called before the first query runs: if loading fails,
+ * the controls must still respond rather than falling through to native form
+ * submission, which would reload the page.
  */
 function bindEvents() {
   // The multi-selects live outside the form's native value handling, so they
@@ -410,7 +560,7 @@ function bindEvents() {
     th.querySelector('button').addEventListener('click', () => {
       const column = th.dataset.sort;
       // Same column flips direction; a new column starts descending, except
-      // for the two text columns where A-Z is the useful first click.
+      // for the leader column where A-Z is the useful first click.
       sort = sort.column === column
         ? { column, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
         : { column, direction: column === 'leader' ? 'asc' : 'desc' };
@@ -419,20 +569,38 @@ function bindEvents() {
     });
   }
 
+  els.keyForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = els.keyInput.value.trim();
+    if (!value) return;
+    setKey(value);
+    paintKeyState();
+    refresh({ resetPage: true, chartsToo: false });
+  });
+  els.keyClear.addEventListener('click', () => {
+    setKey(null);
+    paintKeyState();
+    refresh({ resetPage: true, chartsToo: false });
+  });
+  els.downloads.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-table]');
+    if (button) download(button.dataset.table, button.dataset.format, button);
+  });
+
   els.sqlForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    els.sqlHead.innerHTML = '';
     els.sqlBody.innerHTML = '<tr><td class="empty">Running…</td></tr>';
     try {
-      const rows = await runSql(els.sqlInput.value);
+      const { rows } = await runSql(els.sqlInput.value);
       if (!rows.length) {
-        els.sqlHead.innerHTML = '';
         els.sqlBody.innerHTML = '<tr><td class="empty">Query returned no rows.</td></tr>';
         return;
       }
       const columns = Object.keys(rows[0]);
       els.sqlHead.innerHTML =
         `<tr>${columns.map((c) => `<th scope="col">${escapeHtml(c)}</th>`).join('')}</tr>`;
-      els.sqlBody.innerHTML = rows.slice(0, 200).map((row) =>
+      els.sqlBody.innerHTML = rows.map((row) =>
         `<tr>${columns.map((c) => {
           const value = row[c];
           const isNumber = typeof value === 'number';
@@ -440,7 +608,8 @@ function bindEvents() {
         }).join('')}</tr>`).join('');
     } catch (error) {
       els.sqlHead.innerHTML = '';
-      els.sqlBody.innerHTML = `<tr><td class="empty">${escapeHtml(error.message)}</td></tr>`;
+      els.sqlBody.innerHTML =
+        `<tr><td class="empty">${escapeHtml(describeError(error))}</td></tr>`;
     }
   });
 
@@ -451,25 +620,30 @@ function bindEvents() {
 
 async function main() {
   bindEvents();
-  els.releaseMeta.textContent = 'Starting DuckDB and loading the dataset…';
+  paintKeyState();
+  els.releaseMeta.textContent = 'Loading…';
   try {
-    const [manifest, leaders] = await Promise.all([dataVersion(), queryLeaders()]);
+    const [manifest, summary, leaders] = await Promise.all([
+      getManifest(), getSummary(), getLeaders(),
+    ]);
 
     els.releaseMeta.textContent =
-      `Release ${manifest.version} · ${num.format(manifest.tables.tweets.rows)} tweets ` +
-      `· generated ${manifest.generated_at.slice(0, 10)}`;
+      `Release ${manifest.version} · ${num.format(summary.tweets)} tweets · `
+      + `generated ${manifest.generated_at.slice(0, 10)}`;
 
     // Derived from the data rather than hardcoded, so the headline can't go
     // stale the next time a batch of leaders is added.
-    const countries = new Set(leaders.map((l) => l.country));
-    const span = [
-      leaders.reduce((a, l) => Math.min(a, +new Date(l.first_tweet)), Infinity),
-      leaders.reduce((a, l) => Math.max(a, +new Date(l.last_tweet)), -Infinity),
-    ].map((t) => new Date(t).getUTCFullYear());
     els.ledeCounts.textContent =
-      `${num.format(manifest.tables.tweets.rows)} tweets and their engagement ` +
-      `metrics from ${num.format(leaders.length)} heads of government and state ` +
-      `across ${countries.size} countries, ${span[0]}\u2013${span[1]}`;
+      `${num.format(summary.tweets)} tweets and their engagement metrics from `
+      + `${num.format(summary.leaders)} heads of government and state across `
+      + `${num.format(summary.countries)} countries, `
+      + `${summary.first_date.slice(0, 4)}–${summary.last_date.slice(0, 4)}`;
+
+    leaderName = new Map(leaders.map((l) => [l.leader_id, l.name]));
+    for (const input of [els.start, els.end]) {
+      input.min = summary.first_date;
+      input.max = summary.last_date;
+    }
 
     leaderSelect.setItems(leaders.map((l) => ({
       value: l.leader_id, label: `${l.name} (${l.country})`,
@@ -482,8 +656,9 @@ async function main() {
     paintSortHeaders();
     await refresh();
   } catch (error) {
-    els.releaseMeta.textContent = `Could not load the dataset: ${error.message}`;
-    els.stats.innerHTML = `<dl class="stat"><dt>Error</dt><dd style="font-size:1rem">${escapeHtml(error.message)}</dd></dl>`;
+    els.releaseMeta.textContent = `Could not load the dataset: ${describeError(error)}`;
+    els.stats.innerHTML =
+      `<dl class="stat"><dt>Error</dt><dd style="font-size:1rem">${escapeHtml(describeError(error))}</dd></dl>`;
   }
 }
 

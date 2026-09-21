@@ -10,9 +10,9 @@ data_version()
 A length-one character vector, for example `"v1.0.0"`.
 }
 \description{
-Reports the GitHub release tag that the cached tables came from. The tag is
-read from the manifest attached to the repository's latest release, so it
-changes on its own when new data is published.
+Reports the release tag that the cached tables came from. The tag is read
+from the manifest the API publishes, so it changes on its own when new data
+is released. Reading the manifest needs no API key.
 }
 \examples{
 \dontrun{

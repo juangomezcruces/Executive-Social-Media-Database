@@ -11,7 +11,9 @@ clear_cache()
 }
 \description{
 Deletes every cached manifest and table. The next call to [load_leaders()],
-[get_tweets()] or [get_sentiment()] downloads them again.
+[get_tweets()] or [get_sentiment()] downloads them again. A key saved by
+`set_api_key(persist = TRUE)` is left alone: it is a credential, not a
+cache, and throwing it away here would be a surprising thing to do.
 }
 \examples{
 \dontrun{

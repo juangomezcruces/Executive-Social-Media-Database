@@ -1,10 +1,90 @@
 # Changelog
 
 Every data release gets an entry here. The web app and both packages read the
-`manifest.json` attached to the **latest** release, so publishing a new tagged
-release is what propagates a change — no downstream version bump is needed.
+manifest the API publishes, so deploying a new release is what propagates a
+change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [v2.0.0] — 2026-09-21
+
+**Breaking.** The data is no longer a public file. Until v1.3.0 the Parquet
+tables were committed to this repository and the CSVs were attached to every
+release, so anyone who found the URL had the whole corpus. From v2.0.0 the
+tables sit behind an API: browsing is open and capped at **100 rows a request**,
+and whole tables need a key, which is free and issued on request.
+
+No row of data changed. 62 leaders, 498,605 tweets, same schema, same digests.
+
+### What you have to do
+
+- **Using the packages?** Upgrade, then set a key once:
+  `lt.set_api_key("esmd_...", persist=True)` / `set_api_key("esmd_...", persist = TRUE)`,
+  or `export LEADERS_TWEETS_KEY=...`. Ask for one: see
+  [API keys](README.md#api-keys). Without a key you get a message telling you
+  exactly that, not a stack trace.
+- **Using the website?** Nothing. Browsing, filtering, sorting and the charts
+  all work as before, without a key.
+- **Using the release assets or a `git clone` for the data?** Those are gone —
+  that is the point of the release. Ask for a key.
+
+### Added
+
+- **The API** (`api/`), a Cloudflare Worker: `/v1/leaders`, `/v1/tweets`,
+  `/v1/count`, `/v1/summary`, `/v1/volume`, `/v1/engagement`, `/v1/manifest`,
+  `/v1/download/{table}.{parquet|csv}` and `POST /v1/sql`. Filters, full-text
+  search, sorting and paging as the web app had them, plus a hard row cap and
+  bounded offsets.
+- **API keys**, stored as SHA-256 hashes only, with every download logged
+  against the key. `scripts/keys.py` issues, lists, revokes, exports and
+  restores them.
+- **`set_api_key()` / `api_key()`** in both packages, reading a key from the
+  call, an R option, an environment variable or a file saved on the machine.
+- **Digest verification** in both packages: the manifest now carries a SHA-256
+  per file and a download that does not match is discarded rather than cached.
+- **`api/DEPLOY.md`**, the runbook, and `scripts/set_api_url.py`, which points
+  all three clients at the deployed API in one command so they cannot drift
+  apart.
+- **`scripts/scrub_history.sh`**, which removes the tables from this
+  repository's history after backing the whole thing up to a bundle.
+
+### Changed
+
+- **The web app is a thin client.** It no longer ships the dataset. Earlier
+  versions loaded the whole Parquet corpus into DuckDB-Wasm in the browser,
+  which meant every visitor had already downloaded it before typing anything.
+  Filters, multi-select, sorting and both charts work exactly as before.
+- **The charts and the summary are computed in the browser** from one
+  precomputed 75 KB monthly object, so moving a filter costs the database
+  nothing. The cost of that: it has no text column, so a text search or a
+  minimum-engagement filter applies to the results table only — and the page
+  says so rather than showing a summary that disagrees with the table beneath
+  it.
+- **The SQL console needs a key** and runs against the live database rather
+  than DuckDB in the browser. Tables are `tweets` and `leaders`; `sentiment` is
+  a download.
+- **`manifest.json` carries no URLs**, only version, row counts and digests per
+  format. Each client already knows the API address and builds download URLs
+  itself, so a redeployed Worker cannot leave a stale URL inside the data.
+- **`data/` is git-ignored**, and the Pages workflow fails the build if a table
+  or anything over 2 MB reaches the site.
+- **The R package gains `openssl`** as a dependency, for digest verification.
+
+### Removed
+
+- DuckDB-Wasm, and with it the 1.28.0 pin and the reason for it.
+- The committed Parquet tables and the release assets.
+- `scripts/make_api_key.py`, replaced by `scripts/keys.py`.
+
+### Why Turso and not Cloudflare D1
+
+The rest of the stack is Cloudflare, and D1 would have been one account fewer.
+It does not fit: loading this dataset costs about 4.5 million row-writes once
+the seven indexes and the full-text index are counted, and D1's free plan
+allows 100,000 a day — about 45 days of trickle-loading — with a 500 MB ceiling
+that 326 MB of database was already two thirds of. Turso's free plan allows 10
+million writes a month and takes the finished SQLite file in one upload. The
+Worker, R2 and Pages stay where they were.
 
 ## [v1.3.0] — 2026-09-21
 

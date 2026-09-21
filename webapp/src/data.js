@@ -1,238 +1,321 @@
 /**
- * Client-side query layer for the Executive Social Media Database.
+ * Client for the Executive Social Media Database API.
  *
- * There is no backend. DuckDB-Wasm runs in a worker in the browser and reads
- * the Parquet tables over HTTP range requests, so a filtered query pulls only
- * the row groups and columns it touches rather than the whole 33 MB file.
+ * The browser no longer holds the data. Earlier versions shipped the whole
+ * Parquet corpus to every visitor and queried it with DuckDB-Wasm, which meant
+ * anyone who opened the page had already downloaded the dataset. Row-level
+ * access now goes through the Worker, which caps anonymous requests at 100
+ * rows; the full tables are behind a free key.
  *
- * The tables are served from this site's own origin (./data/). GitHub Release
- * assets are the canonical distribution for the packages, but the release CDN
- * sends no Access-Control-Allow-Origin header, so a browser cannot read them
- * cross-origin -- hence the same-origin copy here.
+ * Two rules shape everything below:
+ *
+ *  1. The database runs on a metered free plan and *fails* once the allowance
+ *     is spent. So the summary and both charts are computed in this file from
+ *     one small precomputed object (`/v1/volume`, ~75 KB gzipped, cached for
+ *     an hour), not from queries. Changing a filter redraws the charts without
+ *     touching the database at all.
+ *  2. That object is monthly and has no text column, so it cannot answer a
+ *     text search or a minimum-engagement filter. Those two apply to the
+ *     results table only, and the UI says so rather than quietly showing
+ *     numbers that disagree with the table beneath them.
  */
 
-// Pinned to 1.28.0 deliberately: it is the last release with the Parquet
-// reader statically linked into the WASM bundle. From 1.29.0 onward DuckDB
-// auto-downloads parquet.duckdb_extension.wasm from extensions.duckdb.org on
-// first query, which adds a third-party runtime dependency that fails closed
-// on networks that block it. Verify Parquet still works before bumping this.
-import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+import { apiBase, API_CONFIGURED } from './config.js';
 
-const DATA_BASE = new URL('./data/', window.location.href).href;
-const TABLES = ['tweets', 'leaders', 'sentiment'];
+const KEY_STORAGE = 'esmd.api_key';
 
-let connection = null;
-let manifest = null;
+/** Anonymous ceilings, mirrored from the Worker so the UI can explain them. */
+export const LIMITS = {
+  rows: 100,
+  offset: 1_000,
+  keyedRows: 1_000,
+  keyedOffset: 1_000_000,
+};
 
-/** Boot DuckDB-Wasm and register the Parquet files. Idempotent. */
-async function connect() {
-  if (connection) return connection;
-
-  const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
-  const workerUrl = URL.createObjectURL(
-    new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-  );
-  const worker = new Worker(workerUrl);
-  const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-  URL.revokeObjectURL(workerUrl);
-
-  await Promise.all(
-    TABLES.map((name) =>
-      db.registerFileURL(
-        `${name}.parquet`,
-        `${DATA_BASE}${name}.parquet`,
-        duckdb.DuckDBDataProtocol.HTTP,
-        false
-      )
-    )
-  );
-
-  connection = await db.connect();
-
-  // Belt and braces: nothing should reach out for an extension at query time.
-  try {
-    await connection.query('SET autoinstall_known_extensions=false');
-    await connection.query('SET autoload_known_extensions=false');
-  } catch {
-    // Older builds don't expose these settings; Parquet is linked in anyway.
-  }
-
-  return connection;
-}
-
-/** Run SQL and return plain JS objects. */
-async function sql(query, params = []) {
-  const conn = await connect();
-  const statement = await conn.prepare(query);
-  try {
-    const result = await statement.query(...params);
-    return result.toArray().map((row) => {
-      const object = row.toJSON();
-      // Arrow hands back BigInt for 64-bit ints; JSON and Chart.js both choke on it.
-      for (const [key, value] of Object.entries(object)) {
-        if (typeof value === 'bigint') object[key] = Number(value);
-      }
-      return object;
-    });
-  } finally {
-    await statement.close();
+export class ApiError extends Error {
+  constructor(message, { status = 0, hint = null } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.hint = hint;
   }
 }
 
-/** Release metadata: version, row counts, generation date. */
-export async function dataVersion() {
-  if (!manifest) {
-    const response = await fetch(`${DATA_BASE}manifest.json`);
-    if (!response.ok) throw new Error(`manifest.json: HTTP ${response.status}`);
-    manifest = await response.json();
-  }
-  return manifest;
-}
-
-/** Every leader, with per-leader totals. Used to populate the filters. */
-export async function queryLeaders() {
-  return sql(`
-    SELECT leader_id, name, handle, country, country_iso3, office,
-           n_tweets, first_tweet, last_tweet, mean_engagement,
-           source_id_reliable, has_sentiment
-    FROM 'leaders.parquet'
-    ORDER BY name
-  `);
-}
+// ---------------------------------------------------------------------------
+// the key
+// ---------------------------------------------------------------------------
 
 /**
- * Build the shared WHERE clause. Returns { clause, params } so every query
- * below filters identically and the table, charts and count can never disagree.
+ * Keys live in this browser's local storage and nowhere else. They are not
+ * secrets in the password sense — they are free, read-only, and identify a
+ * researcher rather than authorise a purchase — but they are still the
+ * holder's, so they never leave this origin.
  */
-function where(filters = {}, prefix = '') {
+export function getKey() {
+  try {
+    return localStorage.getItem(KEY_STORAGE) || null;
+  } catch {
+    return null; // private browsing, or storage blocked
+  }
+}
+
+export function setKey(value) {
+  try {
+    if (value) localStorage.setItem(KEY_STORAGE, value.trim());
+    else localStorage.removeItem(KEY_STORAGE);
+  } catch {
+    // Nothing to do: the session simply stays anonymous.
+  }
+}
+
+export const hasKey = () => Boolean(getKey());
+
+// ---------------------------------------------------------------------------
+// transport
+// ---------------------------------------------------------------------------
+
+async function api(path, { method = 'GET', body = null, signal = null } = {}) {
+  if (!API_CONFIGURED && apiBase().includes('REPLACE-ME')) {
+    throw new ApiError('The API address has not been set yet.', {
+      hint: 'Edit webapp/src/config.js with the deployed Worker URL — see api/DEPLOY.md.',
+    });
+  }
+
+  const headers = {};
+  const key = getKey();
+  if (key) headers.Authorization = `Bearer ${key}`;
+  if (body) headers['Content-Type'] = 'application/json';
+
+  let response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, {
+      method, headers, signal,
+      body: body ? JSON.stringify(body) : null,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new ApiError('Could not reach the API.', { hint: error.message });
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError(`The API returned a non-JSON response (HTTP ${response.status}).`,
+      { status: response.status });
+  }
+
+  if (!response.ok) {
+    throw new ApiError(payload.error || `HTTP ${response.status}`, {
+      status: response.status,
+      hint: payload.hint || null,
+    });
+  }
+  return payload;
+}
+
+/** Cache the objects that never change within a page view. */
+const once = new Map();
+function cached(path, loader) {
+  if (!once.has(path)) {
+    const promise = loader().catch((error) => {
+      once.delete(path);   // a failure must not be cached forever
+      throw error;
+    });
+    once.set(path, promise);
+  }
+  return once.get(path);
+}
+
+// ---------------------------------------------------------------------------
+// reference data
+// ---------------------------------------------------------------------------
+
+/** Current release: version, row counts, generation date. */
+export const getManifest = () => cached('manifest', () => api('/manifest'));
+
+/** Headline totals for the whole corpus, precomputed. */
+export const getSummary = () => cached('summary', () => api('/summary'));
+
+/** All 62 leaders. Drives the filters and the id → name mapping. */
+export const getLeaders = () =>
+  cached('leaders', async () => (await api('/leaders')).rows);
+
+/** Monthly totals per leader. The source for every number the API never sees. */
+export const getVolume = () => cached('volume', () => api('/volume'));
+
+// ---------------------------------------------------------------------------
+// row-level queries
+// ---------------------------------------------------------------------------
+
+/** Turn the UI's filter object into query parameters the Worker understands. */
+function toParams(filters = {}) {
   const {
     leaders = [], countries = [], startDate, endDate,
     minEngagement, search, excludeReplies,
   } = filters;
-  const col = (name) => `${prefix}${name}`;
-  const clauses = [];
-  const params = [];
-
-  // leaders and countries are multi-select: an empty list means "no filter".
-  if (leaders.length) {
-    clauses.push(`${col('leader_id')} IN (${leaders.map(() => '?').join(', ')})`);
-    params.push(...leaders);
-  }
-  if (countries.length) {
-    clauses.push(`${col('country')} IN (${countries.map(() => '?').join(', ')})`);
-    params.push(...countries);
-  }
-  if (startDate) { clauses.push(`${col('date')} >= CAST(? AS DATE)`); params.push(startDate); }
-  if (endDate) { clauses.push(`${col('date')} <= CAST(? AS DATE)`); params.push(endDate); }
-  if (minEngagement) {
-    clauses.push(`${col('engagement')} >= ?`);
-    params.push(Number(minEngagement));
-  }
-  if (search) { clauses.push(`${col('text')} ILIKE ?`); params.push(`%${search}%`); }
-  if (excludeReplies) clauses.push(`NOT ${col('is_reply')}`);
-
-  return { clause: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+  const params = new URLSearchParams();
+  if (leaders.length) params.set('leader', leaders.join(','));
+  if (countries.length) params.set('country', countries.join(','));
+  if (startDate) params.set('start', startDate);
+  if (endDate) params.set('end', endDate);
+  if (minEngagement) params.set('min_engagement', String(Math.trunc(minEngagement)));
+  if (search) params.set('q', search);
+  if (excludeReplies) params.set('exclude_replies', 'true');
+  return params;
 }
 
-/** Columns the results table may be ordered by, mapped to real SQL. */
-export const SORTABLE = {
-  leader: 'l.name',
-  created_at: 't.created_at',
-  retweet_count: 't.retweet_count',
-  reply_count: 't.reply_count',
-  like_count: 't.like_count',
-  quote_count: 't.quote_count',
-  engagement: 't.engagement',
-};
-
-/** Build a safe ORDER BY. Never interpolates user input. */
-function orderBy(sort, direction) {
-  const column = SORTABLE[sort] || SORTABLE.created_at;
-  const dir = String(direction).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-  // tweet_uid breaks ties so paging is stable when values repeat.
-  return `ORDER BY ${column} ${dir} NULLS LAST, t.tweet_uid ASC`;
-}
-
-/** A page of tweets matching the filters, plus the total row count. */
+/** One page of tweets. The Worker decides the real limit; we ask politely. */
 export async function queryTweets(
   filters = {},
-  { limit = 50, offset = 0, sort = 'created_at', direction = 'desc' } = {},
+  { limit = 50, offset = 0, sort = 'created_at', direction = 'desc', signal = null } = {},
 ) {
-  const bare = where(filters);
-  const qualified = where(filters, 't.');
-
-  const [{ total }] = await sql(
-    `SELECT COUNT(*) AS total FROM 'tweets.parquet' ${bare.clause}`, bare.params
-  );
-  const rows = await sql(`
-    SELECT t.tweet_uid, l.name AS leader, t.country, t.created_at, t.lang, t.text,
-           t.is_reply, t.retweet_count, t.reply_count, t.like_count,
-           t.quote_count, t.engagement
-    FROM 'tweets.parquet' t
-    JOIN 'leaders.parquet' l ON l.leader_id = t.leader_id
-    ${qualified.clause}
-    ${orderBy(sort, direction)}
-    LIMIT ${Number(limit)} OFFSET ${Number(offset)}
-  `, qualified.params);
-
-  return { rows, total };
+  const params = toParams(filters);
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  params.set('sort', sort);
+  params.set('direction', direction);
+  return api(`/tweets?${params}`, { signal });
 }
 
-/** Monthly tweet counts and mean engagement under the current filters. */
-export async function queryVolume(filters = {}) {
-  const { clause, params } = where(filters);
-  // Truncate the DATE column, not created_at: created_at is TIMESTAMP WITH
-  // TIME ZONE and date_trunc has no overload for it in DuckDB-Wasm. Using
-  // `date` also means the query never has to read the timestamp column.
-  return sql(`
-    SELECT date_trunc('month', date) AS month,
-           COUNT(*) AS tweets,
-           ROUND(AVG(engagement), 1) AS mean_engagement
-    FROM 'tweets.parquet'
-    ${clause}
-    GROUP BY 1
-    ORDER BY 1
-  `, params);
+/**
+ * How many rows match. Counting is the one operation that can get expensive,
+ * so the Worker stops at 10,000 and reports `exact: false` past that.
+ */
+export async function queryCount(filters = {}, { signal = null } = {}) {
+  return api(`/count?${toParams(filters)}`, { signal });
 }
 
-/** Mean engagement per tweet by leader, highest first. */
-export async function queryEngagementByLeader(filters = {}, { limit = 15 } = {}) {
-  const { clause, params } = where(filters, 't.');
-  return sql(`
-    SELECT l.name AS leader, l.country,
-           COUNT(*) AS tweets,
-           ROUND(AVG(t.engagement), 0) AS mean_engagement
-    FROM 'tweets.parquet' t
-    JOIN 'leaders.parquet' l ON l.leader_id = t.leader_id
-    ${clause}
-    GROUP BY 1, 2
-    HAVING COUNT(*) >= 25
-    ORDER BY mean_engagement DESC
-    LIMIT ${Number(limit)}
-  `, params);
+/** Read-only SELECT. Key holders only; the Worker enforces that, not this. */
+export async function runSql(sql, { signal = null } = {}) {
+  return api('/sql', { method: 'POST', body: { sql }, signal });
 }
 
-/** Headline totals for the stat row. */
-export async function querySummary(filters = {}) {
-  const { clause, params } = where(filters);
-  // SUM over BIGINT widens to HUGEINT, which arrives as a 128-bit value that
-  // survives the BigInt coercion in sql() and then blows up in arithmetic.
-  // Cast it down in SQL where the width is known.
-  const [row] = await sql(`
-    SELECT COUNT(*) AS tweets,
-           COUNT(DISTINCT leader_id) AS leaders,
-           CAST(SUM(engagement) AS DOUBLE) AS engagement,
-           CAST(SUM(CASE WHEN is_reply THEN 1 ELSE 0 END) AS DOUBLE) AS replies,
-           MIN(date) AS first_date,
-           MAX(date) AS last_date
-    FROM 'tweets.parquet'
-    ${clause}
-  `, params);
-  return row;
+/** Where a key holder gets the full tables. */
+export function downloadUrl(table, format) {
+  return `${apiBase()}/download/${table}.${format}`;
 }
 
-/** Escape hatch for the SQL console. */
-export async function runSql(query) {
-  return sql(query);
+/**
+ * Fetch a full table with the stored key and hand back a blob URL.
+ *
+ * A plain link cannot carry an Authorization header, so the download has to go
+ * through fetch. The file is large, so the caller gets progress-free but
+ * honest behaviour: it either arrives or it throws.
+ */
+export async function downloadTable(table, format) {
+  const key = getKey();
+  if (!key) throw new ApiError('An API key is required for full-table downloads.');
+  const response = await fetch(downloadUrl(table, format), {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try { message = (await response.json()).error || message; } catch { /* keep it */ }
+    throw new ApiError(message, { status: response.status });
+  }
+  return { blob: await response.blob(), filename: `${table}.${format}` };
+}
+
+// ---------------------------------------------------------------------------
+// aggregates, computed here from the precomputed monthly object
+// ---------------------------------------------------------------------------
+
+/** Filters the monthly object can honour. The other two cannot be applied. */
+export function chartableFilters(filters = {}) {
+  return {
+    leaders: filters.leaders || [],
+    countries: filters.countries || [],
+    startDate: filters.startDate || null,
+    endDate: filters.endDate || null,
+    excludeReplies: Boolean(filters.excludeReplies),
+  };
+}
+
+const startsMidMonth = (date) => Boolean(date) && !date.endsWith('-01');
+
+/** The last day of a month is not partial; any earlier day is. */
+function endsMidMonth(date) {
+  if (!date) return false;
+  const [year, month, day] = date.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day !== lastDay;
+}
+
+/** True when a filter is set that the charts and summary cannot reflect. */
+export function hasUnchartableFilter(filters = {}) {
+  return Boolean(filters.search) || Boolean(filters.minEngagement);
+}
+
+/**
+ * Everything the stat row and both charts need, under the current selection.
+ *
+ * Costs zero database rows: it is arithmetic over ~5,200 precomputed records
+ * that the browser already has. `monthly` and `byLeader` are two views of the
+ * same filtered set, so the charts can never disagree with each other or with
+ * the totals above them.
+ */
+export async function queryAggregates(filters = {}) {
+  const [volume, leaders] = await Promise.all([getVolume(), getLeaders()]);
+  const countryOf = new Map(leaders.map((l) => [l.leader_id, l.country]));
+  const nameOf = new Map(leaders.map((l) => [l.leader_id, l.name]));
+
+  const wanted = filters.leaders?.length ? new Set(filters.leaders) : null;
+  const countries = filters.countries?.length ? new Set(filters.countries) : null;
+  // The object is monthly, so a date range is applied at month resolution.
+  const from = filters.startDate ? filters.startDate.slice(0, 7) : null;
+  const to = filters.endDate ? filters.endDate.slice(0, 7) : null;
+  const broadcast = Boolean(filters.excludeReplies);
+
+  const months = new Map();
+  const perLeader = new Map();
+  let tweets = 0;
+  let engagement = 0;
+  let replies = 0;
+
+  for (const row of volume) {
+    if (wanted && !wanted.has(row.leader_id)) continue;
+    if (countries && !countries.has(countryOf.get(row.leader_id))) continue;
+    if (from && row.month < from) continue;
+    if (to && row.month > to) continue;
+
+    const n = broadcast ? row.broadcast : row.tweets;
+    if (!n) continue;
+    const e = broadcast ? row.engagement_broadcast : row.engagement;
+
+    tweets += n;
+    engagement += e;
+    if (!broadcast) replies += row.tweets - row.broadcast;
+
+    const month = months.get(row.month) || { month: row.month, tweets: 0, engagement: 0 };
+    month.tweets += n;
+    month.engagement += e;
+    months.set(row.month, month);
+
+    const leader = perLeader.get(row.leader_id)
+      || { leader_id: row.leader_id, leader: nameOf.get(row.leader_id) || row.leader_id,
+           country: countryOf.get(row.leader_id) || '', tweets: 0, engagement: 0 };
+    leader.tweets += n;
+    leader.engagement += e;
+    perLeader.set(row.leader_id, leader);
+  }
+
+  const monthly = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
+  const byLeader = [...perLeader.values()]
+    .map((l) => ({ ...l, mean_engagement: Math.round(l.engagement / l.tweets) }));
+
+  return {
+    monthly,
+    byLeader,
+    totals: {
+      tweets,
+      engagement,
+      replies,
+      leaders: perLeader.size,
+      firstMonth: monthly.length ? monthly[0].month : null,
+      lastMonth: monthly.length ? monthly[monthly.length - 1].month : null,
+      // A range that starts or ends mid-month pulls in those whole months.
+      partialMonths: startsMidMonth(filters.startDate) || endsMidMonth(filters.endDate),
+    },
+  };
 }

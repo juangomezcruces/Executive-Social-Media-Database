@@ -4,10 +4,12 @@
 # GitHub only reads workflows from the repository root .github/workflows.
 #
 # There is no build step: the app is plain ES modules, so "building" is copying
-# webapp/ and the Parquet tables into one directory and uploading it. The data
-# is served from the site's own origin because GitHub's release asset CDN sends
-# no Access-Control-Allow-Origin header, so a browser cannot read release
-# assets cross-origin.
+# webapp/ into one directory and uploading it.
+#
+# Since v2.0.0 the site ships NO DATA. Rows come from the API, which caps
+# anonymous requests at 100; publishing the tables next to the page would make
+# that cap decoration. The guard below fails the build rather than let a data
+# file reach the site by accident.
 
 name: Deploy web app
 
@@ -16,10 +18,7 @@ on:
     branches: [main]
     paths:
       - 'webapp/**'
-      - 'data/**'
       - '.github/workflows/deploy.yml'
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -41,22 +40,37 @@ jobs:
       - name: Assemble the site
         run: |
           set -euo pipefail
-          mkdir -p _site/data
+          mkdir -p _site
           cp -r webapp/. _site/
-          cp data/*.parquet _site/data/
-          cp data/manifest.json data/schema.json _site/data/
           echo "--- site contents ---"
           find _site -type f | sort
           du -sh _site
 
-      - name: Check the data actually landed
+      - name: Refuse to publish data
         run: |
           set -euo pipefail
-          for f in tweets leaders sentiment; do
-            test -s "_site/data/$f.parquet" || { echo "missing _site/data/$f.parquet"; exit 1; }
-          done
-          test -s _site/data/manifest.json
+          offenders=$(find _site -type f \
+            \( -name '*.parquet' -o -name '*.csv' -o -name '*.csv.gz' \) || true)
+          if [ -n "$offenders" ]; then
+            echo "These would be published on an open URL, defeating the API cap:"
+            echo "$offenders"
+            exit 1
+          fi
+          # Anything unexpectedly large is data by another name.
+          big=$(find _site -type f -size +2M || true)
+          if [ -n "$big" ]; then
+            echo "Unexpectedly large files in the site:"; echo "$big"; exit 1
+          fi
+
+      - name: Check the site is wired to a real API
+        run: |
+          set -euo pipefail
           test -s _site/index.html
+          if grep -q 'REPLACE-ME' _site/src/config.js; then
+            echo "webapp/src/config.js still holds the placeholder API URL."
+            echo "Run: python scripts/set_api_url.py https://<worker>.workers.dev/v1"
+            exit 1
+          fi
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

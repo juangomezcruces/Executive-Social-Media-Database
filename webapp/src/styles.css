@@ -306,3 +306,34 @@ a { color: var(--series-1); }
   color: var(--text-secondary); background: var(--plane);
   border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
 }
+
+/* --- notes, keys and downloads ----------------------------------------- */
+
+/* Used wherever the page has to explain a limit rather than hide it. */
+.note {
+  margin: 0 0 16px;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--series-1-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.pager + .note { margin: 12px 0 0; }
+
+.keyrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.keyrow input { flex: 1 1 260px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+#key-status { margin-top: 8px; }
+#key-status[data-on="true"] { color: var(--series-1); }
+
+.downloads {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gridline);
+}
+.downloads .btn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+
+.tag--warn { color: #b4541c; border-color: #b4541c; }
+@media (prefers-color-scheme: dark) { .tag--warn { color: #e08a52; border-color: #e08a52; } }
+
+tbody[aria-busy="true"] { opacity: 0.55; transition: opacity 120ms; }

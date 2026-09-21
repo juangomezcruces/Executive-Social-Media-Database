@@ -14,6 +14,11 @@ import pytest
 import leaders_tweets as lt
 from leaders_tweets import core
 
+# The autouse fixture below replaces core._download with a stub that refuses
+# to touch the network. The two tests that exercise the real downloader's
+# header handling need the original, captured here before that happens.
+REAL_DOWNLOAD = core._download
+
 
 LEADERS = pd.DataFrame([
     dict(leader_id="modi", name="Narendra Modi", handle="narendramodi",
@@ -72,6 +77,10 @@ def fixture_dataset(tmp_path, monkeypatch):
     that unexpectedly reaches for the network will surface it.
     """
     monkeypatch.setenv("LEADERS_TWEETS_CACHE", str(tmp_path))
+    # A real key in the developer's environment must not leak into tests.
+    monkeypatch.delenv("LEADERS_TWEETS_KEY", raising=False)
+    monkeypatch.setenv("LEADERS_TWEETS_API", "https://api.invalid/v1")
+    core._SESSION_KEY = None
     core._MEMO.clear()
 
     version = "v9.9.9"
@@ -84,7 +93,11 @@ def fixture_dataset(tmp_path, monkeypatch):
         "dataset": "Executive Social Media Database",
         "version": version,
         "tables": {
-            name: {"parquet": f"https://example.invalid/{name}.parquet", "rows": 0}
+            name: {
+                "rows": 0,
+                "parquet": {"bytes": 0, "sha256": ""},
+                "csv": {"bytes": 0, "sha256": ""},
+            }
             for name in ("leaders", "tweets", "sentiment")
         },
     }
@@ -96,6 +109,7 @@ def fixture_dataset(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_download", _no_network)
     monkeypatch.setattr(core, "MANIFEST_TTL_SECONDS", 10**9)
     yield
+    core._SESSION_KEY = None
     core._MEMO.clear()
 
 
@@ -185,3 +199,115 @@ def test_manifest_falls_back_to_cache_when_offline(monkeypatch):
 
     monkeypatch.setattr(core, "_download", _offline)
     assert lt.data_version() == "v9.9.9"
+
+
+# --------------------------------------------------------------------------
+# API keys
+# --------------------------------------------------------------------------
+
+def _uncached(name="tweets"):
+    """Delete a cached table so the next call has to reach for the network."""
+    version = core._manifest()["version"]
+    (core.cache_dir() / version / f"{name}.parquet").unlink()
+    core._MEMO.clear()
+
+
+def test_a_missing_key_raises_something_actionable(monkeypatch):
+    monkeypatch.setattr(core, "_download", lambda url, dest: dest)
+    _uncached()
+    with pytest.raises(core.MissingKeyError) as raised:
+        lt.get_tweets()
+    message = str(raised.value)
+    assert "LEADERS_TWEETS_KEY" in message
+    assert "set_api_key" in message
+    assert "#api-keys" in message
+
+
+def test_the_key_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("LEADERS_TWEETS_KEY", "esmd_from_env")
+    assert lt.api_key() == "esmd_from_env"
+
+
+def test_set_api_key_wins_over_the_environment(monkeypatch):
+    monkeypatch.setenv("LEADERS_TWEETS_KEY", "esmd_from_env")
+    lt.set_api_key("esmd_explicit")
+    assert lt.api_key() == "esmd_explicit"
+
+
+def test_a_persisted_key_survives_clear_cache():
+    # clear_cache() empties the same directory the key lives in; a key is a
+    # credential, not a cache, so it has to survive.
+    lt.set_api_key("esmd_persisted", persist=True)
+    core._SESSION_KEY = None
+    lt.clear_cache()
+    assert lt.api_key() == "esmd_persisted"
+    lt.set_api_key(None, persist=True)
+    assert lt.api_key() is None
+
+
+def test_the_download_sends_the_key_as_a_bearer_token(monkeypatch):
+    seen = {}
+
+    class _Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            yield b"payload"
+
+    def _get(url, **kwargs):
+        seen["url"] = url
+        seen["headers"] = kwargs.get("headers")
+        return _Response()
+
+    monkeypatch.setattr(core.requests, "get", _get)
+    lt.set_api_key("esmd_secret")
+    REAL_DOWNLOAD("https://api.invalid/v1/download/tweets.parquet",
+                  core.cache_dir() / "scratch.bin")
+    assert seen["headers"] == {"Authorization": "Bearer esmd_secret"}
+
+
+def test_a_rejected_key_explains_itself(monkeypatch):
+    class _Response:
+        status_code = 401
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(core.requests, "get", lambda url, **kw: _Response())
+    lt.set_api_key("esmd_revoked")
+    with pytest.raises(core.MissingKeyError, match="revoked or mistyped"):
+        REAL_DOWNLOAD("https://api.invalid/v1/download/tweets.parquet",
+                      core.cache_dir() / "scratch.bin")
+
+
+def test_a_corrupted_download_is_discarded(monkeypatch, tmp_path):
+    # The manifest carries a digest; a truncated file must not be cached and
+    # then read as if it were the dataset.
+    manifest = json.loads((core.cache_dir() / "manifest.json").read_text())
+    manifest["tables"]["tweets"]["parquet"]["sha256"] = "0" * 64
+    (core.cache_dir() / "manifest.json").write_text(json.dumps(manifest))
+
+    def _write_junk(url, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"not a parquet file")
+        return dest
+
+    monkeypatch.setattr(core, "_download", _write_junk)
+    lt.set_api_key("esmd_valid")
+    _uncached()
+    with pytest.raises(OSError, match="digest"):
+        lt.get_tweets()
+    version = manifest["version"]
+    assert not (core.cache_dir() / version / "tweets.parquet").exists()
