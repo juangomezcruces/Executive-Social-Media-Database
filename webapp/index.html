@@ -6,7 +6,7 @@
 <title>Executive Social Media Database</title>
 <meta name="description" content="Search and chart tweets from heads of government and state, 2010-2023. Free API keys for researchers.">
 <link rel="stylesheet" href="./src/styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
 </head>
 <body>
 
@@ -83,10 +83,12 @@
       </div>
       <div class="field field--check">
         <label class="check">
-          <input type="checkbox" id="f-noreplies">
-          <span>Exclude replies</span>
+          <input type="checkbox" id="f-replies">
+          <span>Include replies</span>
         </label>
-        <span class="hint">@-replies have far lower engagement than broadcast tweets</span>
+        <span class="hint">Off by default: replies are conversation, not
+          broadcast, and draw far less engagement. Trump's and Obama's are
+          text-detected, so undercounted.</span>
       </div>
       <div class="field field--actions">
         <button type="submit" class="btn btn--primary">Apply</button>

@@ -69,7 +69,7 @@ for that leader -- check it before using ids to rehydrate against the X API.
 | `like_count` | `int64` | Likes at collection time. |
 | `quote_count` | `int64` | Quote tweets at collection time. |
 | `engagement` | `int64` | retweet_count + reply_count + like_count + quote_count. |
-| `is_reply` | `boolean` | True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16. |
+| `is_reply` | `boolean` | True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16. One caveat: the US archive (Trump, Obama) carries no reply metadata at all, so for those two the @-prefix is the only signal available. Measured against the leaders that do have metadata, that rule alone misses about 30% of genuine replies, so their reply counts are floors, not totals. |
 | `is_deleted` | `boolean` | True when the source archive records the tweet as later deleted. Only populated for the US batch (Trump, Obama); null elsewhere, which means unknown rather than false. |
 | `possibly_sensitive` | `boolean` | X's possibly_sensitive flag; null where not returned. |
 | `in_reply_to_user_id` | `string` | User id this tweet replies to; null for non-replies. |

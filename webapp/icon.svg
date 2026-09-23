@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img"
+     aria-label="Executive Social Media Database">
+  <!--
+    A speech bubble with three rising bars: what the dataset is, in one mark —
+    political speech, counted. Drawn for 16px first, which is why there are
+    three bars and not five, and why the tail is short and fat enough to
+    survive being two pixels wide.
+
+    Solid fill rather than an outline, and a mid-tone blue rather than the
+    page's theme colour, so the silhouette holds on a white tab strip and on a
+    dark one without needing a prefers-color-scheme rule that some browsers
+    ignore in favicons.
+  -->
+  <path d="M2.6 1.5h10.8a2.1 2.1 0 0 1 2.1 2.1v6.3a2.1 2.1 0 0 1-2.1 2.1H6.9l-3.4 3v-3H2.6A2.1 2.1 0 0 1 .5 9.9V3.6a2.1 2.1 0 0 1 2.1-2.1z"
+        fill="rgb(42,120,214)"/>
+  <rect x="3.6" y="7.3" width="2.2" height="2.9" rx="0.5" fill="rgb(255,255,255)"/>
+  <rect x="6.9" y="5.4" width="2.2" height="4.8" rx="0.5" fill="rgb(255,255,255)"/>
+  <rect x="10.2" y="3.3" width="2.2" height="6.9" rx="0.5" fill="rgb(255,255,255)"/>
+</svg>

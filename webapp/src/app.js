@@ -111,7 +111,7 @@ const els = {
   form: document.getElementById('filters'),
   leader: document.getElementById('f-leader'),
   country: document.getElementById('f-country'),
-  noReplies: document.getElementById('f-noreplies'),
+  replies: document.getElementById('f-replies'),
   start: document.getElementById('f-start'),
   end: document.getElementById('f-end'),
   engagement: document.getElementById('f-engagement'),
@@ -189,7 +189,10 @@ function currentFilters() {
     endDate: els.end.value || null,
     minEngagement: els.engagement.value ? Number(els.engagement.value) : null,
     search: els.search.value.trim() || null,
-    excludeReplies: els.noReplies.checked,
+    // The checkbox now reads "Include replies" and is off by default:
+    // broadcast is the honest baseline, since a leader who runs an
+    // @-reply account otherwise swamps every volume comparison.
+    excludeReplies: !els.replies.checked,
   };
 }
 
@@ -314,9 +317,9 @@ function renderStats(totals) {
   const replyShare = totals.tweets
     ? Math.round((totals.replies / totals.tweets) * 100)
     : 0;
-  const replyLine = els.noReplies.checked
-    ? 'replies excluded'
-    : `${num.format(totals.replies)} replies (${replyShare}%)`;
+  const replyLine = els.replies.checked
+    ? `${num.format(totals.replies)} replies (${replyShare}%)`
+    : 'broadcast only';
   els.stats.innerHTML = `
     <dl class="stat"><dt>Tweets</dt><dd>${num.format(totals.tweets)}<span class="sub">${span}</span></dd></dl>
     <dl class="stat"><dt>Leaders</dt><dd>${num.format(totals.leaders)}</dd></dl>
@@ -423,7 +426,9 @@ function describeSelection({ leaders, countries, excludeReplies }, totals) {
   if (countries.length === 1) parts.push(countries[0]);
   else if (countries.length > 1) parts.push(`${countries.length} countries`);
   if (!parts.length) parts.push('All leaders');
-  if (excludeReplies) parts.push('excluding replies');
+  // Always stated, never implied: which of the two populations this is
+  // decides whether the numbers underneath mean anything.
+  parts.push(excludeReplies ? 'broadcast only' : 'replies included');
   if (totals?.partialMonths) parts.push('whole months only');
   return parts.join(' · ');
 }
@@ -551,6 +556,8 @@ function bindEvents() {
   els.form.addEventListener('reset', () => {
     leaderSelect.clear();
     countrySelect.clear();
+    // Native reset restores the checkbox to unchecked, which is now "replies
+    // excluded" -- the default we want.
     sort = { column: 'created_at', direction: 'desc' };
     paintSortHeaders();
     setTimeout(() => refresh(), 0);

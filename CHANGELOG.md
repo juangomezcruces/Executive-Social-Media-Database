@@ -6,6 +6,41 @@ change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v2.0.1] — 2026-09-23
+
+Site only. No data changed, and the release the API serves is still v2.0.0.
+
+### Fixed
+
+- **The Pages deploy could never succeed.** The workflow guarded against an
+  unconfigured API address by grepping `config.js` for `REPLACE-ME`, but the
+  line `API_CONFIGURED = !API_BASE.includes('REPLACE-ME')` contains that string
+  permanently, so the guard tripped on a correctly configured file and every
+  publish failed at that step. The old DuckDB site therefore stayed live —
+  still serving `data/tweets.parquet` on an open URL, which made the API's
+  100-row cap decoration. The guard now matches the assignment line only.
+
+### Changed
+
+- **Replies are excluded by default** in the web app. The control is now
+  "Include replies", off unless asked. Replies are conversation rather than
+  broadcast and have a median engagement of 3 against 303, so they belong
+  behind an opt-in rather than in the baseline. The summary and the chart note
+  now always state which population is on screen — "broadcast only" or
+  "replies included" — instead of leaving it implied.
+- **A favicon of the project's own**: a speech bubble with three rising bars,
+  drawn for 16px, replacing the generic chart emoji.
+
+### Documented
+
+- **Trump's and Obama's replies are undercounted, by roughly 30%.** Their
+  archive carries no reply metadata, so `is_reply` rests on the `@` prefix
+  alone for those two; calibrated against the 440,004 rows that do have
+  metadata, that rule misses about 30% of real replies. Now stated in
+  `schema.md`, the README and under the toggle itself, and `export_data.py`
+  prints which source files have the gap so a future batch cannot introduce it
+  silently.
+
 ## [v2.0.0] — 2026-09-21
 
 **Breaking.** The data is no longer a public file. Until v1.3.0 the Parquet

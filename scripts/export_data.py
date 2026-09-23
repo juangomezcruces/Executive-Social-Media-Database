@@ -448,7 +448,7 @@ SCHEMA_DOC = {
         "quote_count": "Quote tweets at collection time.",
         "engagement": "retweet_count + reply_count + like_count + quote_count.",
         "is_deleted": "True when the source archive records the tweet as later deleted. Only populated for the US batch (Trump, Obama); null elsewhere, which means unknown rather than false.",
-        "is_reply": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16.",
+        "is_reply": "True for conversational replies (in_reply_to_user_id set, tweet_type 'replied_to', or text starting with @), false for broadcast tweets. Filter these out before comparing posting volume across leaders -- see the note on Modi, 2019-03-16. One caveat: the US archive (Trump, Obama) carries no reply metadata at all, so for those two the @-prefix is the only signal available. Measured against the leaders that do have metadata, that rule alone misses about 30% of genuine replies, so their reply counts are floors, not totals.",
         "possibly_sensitive": "X's possibly_sensitive flag; null where not returned.",
         "in_reply_to_user_id": "User id this tweet replies to; null for non-replies.",
         "tweet_type": "Tweet type as returned by the collector; frequently null.",
@@ -551,6 +551,23 @@ def main() -> None:
             f"{int(tweets['is_reply'].isna().sum()):,} rows have a null is_reply; "
             "refusing to publish a half-populated flag."
         )
+
+    # Say out loud which sources carry no reply metadata. For those, is_reply
+    # rests on the @-prefix alone, which measurably undercounts -- and a silent
+    # undercount is worse than a loud one now that the web app hides replies by
+    # default. If a future batch lands with the same gap, this prints it.
+    has_meta = (tweets["in_reply_to_user_id"].notna()
+                | tweets["tweet_type"].eq("replied_to"))
+    by_file = has_meta.groupby(tweets["source_file"]).any()
+    blind = sorted(by_file[~by_file].index)
+    if blind:
+        rows = int(tweets["source_file"].isin(blind).sum())
+        print(f"\n  note: {len(blind)} source file(s) carry no reply metadata "
+              f"({rows:,} rows). is_reply there rests on the @-prefix alone:")
+        for name in blind:
+            part = tweets[tweets["source_file"] == name]
+            print(f"    {name}: {int(part['is_reply'].sum()):,} of {len(part):,} "
+                  f"flagged, across {part['leader_id'].nunique()} leader(s)")
     if args.base_sentiment:
         print(f"reusing {args.base_sentiment} for sentiment ...")
         sentiment = pd.read_parquet(args.base_sentiment)

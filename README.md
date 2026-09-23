@@ -7,7 +7,7 @@ Three ways in, all reading the same versioned dataset:
 
 | | |
 | --- | --- |
-| **Browse & query** | <https://juangomezcruces.github.io/Executive-Social-Media-Database/> — filter by any combination of leaders and countries, sort by any column, chart, no install, no key |
+| **Browse & query** | <https://juangomezcruces.github.io/Executive-Social-Media-Database/> — filter by any combination of leaders and countries, sort by any column, chart, no install, no key. Replies are excluded unless you ask for them |
 | **Python** | `pip install "git+https://github.com/juangomezcruces/Executive-Social-Media-Database.git#subdirectory=python-package"` |
 | **R** | `remotes::install_github("juangomezcruces/Executive-Social-Media-Database", subdir = "r-package")` |
 
@@ -139,6 +139,16 @@ accounts include Solberg (66%), Correa (59%) and Ardern (57%).
 `tweet_type = 'replied_to'` says so, **or** the text begins with `@`. All three
 are needed: metadata alone misses 134 rows, and the `@` test alone misses 27,466
 replies that open differently (`.@someone Thank you...`).
+
+**Trump and Obama are the exception, and it matters.** Their archive carries no
+reply metadata at all — no `in_reply_to_user_id`, no `replied_to` type — so for
+those two the `@` prefix is the only signal there is. It flags 3,309 of Trump's
+58,249 tweets and 7 of Obama's 352. Measured against the 440,004 rows that *do*
+have metadata, the `@` rule on its own catches 65,135 of 92,601 real replies, so
+it misses about **30%**. Read their reply counts as floors rather than totals,
+and treat a Trump broadcast-only figure as including perhaps 1,400 replies that
+could not be identified. Closing the gap needs a source with reply metadata, not
+a better rule.
 
 ### The tweet id problem
 
