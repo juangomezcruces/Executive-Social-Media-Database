@@ -13,12 +13,16 @@
 
 name: Deploy web app
 
+# Every push to main, with no `paths:` filter. There was one, limited to
+# webapp/** - it saved a minute of CI on unrelated commits and cost a deploy at
+# exactly the wrong moment: a force push that rewrote history gave GitHub no
+# common ancestor to compute a path diff against, so the filter matched nothing
+# and the site silently stayed on the previous version. That version was the
+# one still serving the whole corpus as a file. A redundant 40-second deploy is
+# cheap; a skipped one leaves data published.
 on:
   push:
     branches: [main]
-    paths:
-      - 'webapp/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
