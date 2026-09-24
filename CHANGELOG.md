@@ -34,6 +34,12 @@ v2.0.0.
   future model rejects the schema, and the parser copes with prose either way —
   anything that arrives ungrouped is filed under `related`, which is honest
   rather than guessed.
+- **A "Tweets per leader" chart**, beside the engagement one and drawn from the
+  same precomputed object, so it costs the database nothing. It ranks the
+  leaders in the current selection by volume with no minimum, where the
+  engagement chart needs 25 tweets before a mean means anything. The two
+  disagree often, which is the point: filtered to Brazil and France, Lula leads
+  on volume and Bolsonaro on engagement.
 - **`GET /v1/languages`** and `public/languages.json` — which languages each
   country actually tweets in, at or above a 5% share, derived from the corpus
   rather than hardcoded. It gets Canada (en, fr), Belgium (nl, en, fr) and

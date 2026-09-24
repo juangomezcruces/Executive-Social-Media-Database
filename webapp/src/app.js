@@ -121,6 +121,7 @@ const els = {
   stats: document.getElementById('stats'),
   scopeNote: document.getElementById('scope-note'),
   volNote: document.getElementById('vol-note'),
+  countNote: document.getElementById('count-note'),
   resultCount: document.getElementById('result-count'),
   tbody: document.querySelector('#results tbody'),
   pager: document.getElementById('pager'),
@@ -139,7 +140,7 @@ const els = {
 };
 
 let page = 0;
-let charts = { volume: null, engagement: null };
+let charts = { volume: null, tweets: null, engagement: null };
 let sort = { column: 'created_at', direction: 'desc' };
 let leaderSelect = null;
 let countrySelect = null;
@@ -291,15 +292,20 @@ function drawVolume(rows) {
   charts.volume.update('none');
 }
 
-function drawEngagement(rows) {
+/**
+ * A horizontal bar of one number per leader. Both leader charts are the same
+ * picture of different columns, so they are the same function -- which is also
+ * what keeps them looking like one chart drawn twice rather than two charts.
+ */
+function drawLeaderBars({ key, canvas, rows, value, label }) {
   const t = tokens();
-  charts.engagement?.destroy();
-  charts.engagement = new Chart(document.getElementById('chart-engagement'), {
+  charts[key]?.destroy();
+  charts[key] = new Chart(document.getElementById(canvas), {
     type: 'bar',
     data: {
       labels: rows.map((r) => r.leader),
       datasets: [{
-        data: rows.map((r) => r.mean_engagement),
+        data: rows.map((r) => r[value]),
         backgroundColor: t.series,
         borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 4, bottomRight: 4 },
         borderSkipped: false,
@@ -308,7 +314,7 @@ function drawEngagement(rows) {
       }],
     },
     options: {
-      ...baseOptions(t, { valueLabel: 'Mean engagement', valueAxis: 'x' }),
+      ...baseOptions(t, { valueLabel: label, valueAxis: 'x' }),
       indexAxis: 'y',
       interaction: { mode: 'nearest', intersect: true },
       scales: {
@@ -505,11 +511,31 @@ async function refresh({ resetPage = true, chartsToo = true } = {}) {
       const { monthly, byLeader, totals } = await queryAggregates(filters);
       renderStats(totals);
       drawVolume(monthly);
-      drawEngagement(
-        byLeader.filter((l) => l.tweets >= 25)
+
+      // Every leader in the selection, biggest first. No minimum here: a
+      // leader with nine tweets has a meaningful total, where their mean
+      // engagement would be noise -- which is what the 25 below is for.
+      const byVolume = [...byLeader].sort((a, b) => b.tweets - a.tweets);
+      drawLeaderBars({
+        key: 'tweets',
+        canvas: 'chart-tweets',
+        rows: byVolume.slice(0, 15),
+        value: 'tweets',
+        label: 'Tweets',
+      });
+      els.countNote.textContent = byVolume.length > 15
+        ? `The 15 most active of ${num.format(byVolume.length)} leaders in the current selection`
+        : 'Leaders in the current selection';
+
+      drawLeaderBars({
+        key: 'engagement',
+        canvas: 'chart-engagement',
+        rows: byLeader.filter((l) => l.tweets >= 25)
           .sort((a, b) => b.mean_engagement - a.mean_engagement)
-          .slice(0, 15)
-      );
+          .slice(0, 15),
+        value: 'mean_engagement',
+        label: 'Mean engagement',
+      });
       els.volNote.textContent = describeSelection(filters, totals);
     } catch (error) {
       els.stats.innerHTML =
