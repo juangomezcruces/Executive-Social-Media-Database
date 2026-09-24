@@ -343,59 +343,13 @@ tbody[aria-busy="true"] { opacity: 0.55; transition: opacity 120ms; }
 
 .check--tight { margin-top: 2px; font-size: 12.5px; }
 
-.terms {
-  margin: -6px 0 16px;
-  padding: 10px 12px;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
-.terms-head {
-  margin: 0 0 8px;
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;
-  color: var(--text-secondary); font-weight: 600;
-}
-.terms-hint {
-  margin-left: 8px;
-  text-transform: none; letter-spacing: 0; font-weight: 400;
+/* Says what ticking the box actually does. The suggested terms are no longer
+   shown one by one, so this is the only place the user learns that a model is
+   involved and that it works across languages. */
+.field-note {
+  margin: 4px 0 0;
+  max-width: 46em;
+  font-size: 11.5px; line-height: 1.45;
   color: var(--text-muted);
 }
-.terms-chips { display: flex; flex-direction: column; gap: 8px; }
-
-/* One row per kind of suggestion: the term as typed, words meaning the same,
-   the concepts around it, and the same in the other languages on screen. */
-.terms-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.group-label {
-  /* wide enough that "Related concepts" stays on one line */
-  flex: 0 0 158px; white-space: nowrap;
-  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em;
-  color: var(--text-muted); font-weight: 600;
-  text-align: right; padding-right: 4px;
-}
-/* The heading is itself a control where there is a group to switch off. */
-.group-label--toggle {
-  font-family: inherit;
-  border: 0; background: none; cursor: pointer;
-}
-.group-label--toggle:hover { color: var(--text-secondary); }
-.group-label--toggle[aria-pressed="false"] { text-decoration: line-through; }
-
-@media (max-width: 640px) {
-  .group-label { flex-basis: 100%; text-align: left; padding-right: 0; }
-  .terms-group { row-gap: 4px; }
-}
-
-/* A chip is a real toggle: off means the term is not in the query. */
-.chip {
-  font: inherit; font-size: 13px;
-  padding: 3px 10px; cursor: pointer;
-  border-radius: 999px;
-  border: 1px solid var(--series-1);
-  background: var(--series-1); color: #fff;
-}
-.chip[aria-pressed="false"] {
-  background: transparent; color: var(--text-muted);
-  border-color: var(--border); text-decoration: line-through;
-}
-.chip:hover { filter: brightness(1.06); }
-.chip--original { font-weight: 600; }
+.field-note em { font-style: italic; }

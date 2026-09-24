@@ -52,12 +52,20 @@ v2.0.0.
 
 ### Notes
 
-- The expansion is deliberately a separate step the user can see and edit
-  rather than something applied silently. `/v1/tweets` remains a deterministic
-  function of its parameters, so a cited result stays reproducible: the terms
-  are in the URL. Broadening from synonyms to neighbouring concepts costs
-  precision, which is exactly why the suggestions are grouped and every group
-  can be dropped in one click.
+- The expansion is deliberately a separate step, applied only when the box is
+  ticked. `/v1/tweets` remains a deterministic function of its parameters, so a
+  cited result stays reproducible: the terms are in the URL.
+- **Languages follow the country filter, and nothing else.** With no country
+  or leader selected the suggestions stay in English. An earlier build fell
+  back to all seven corpus languages, which translated `housing` into Czech,
+  Dutch and Italian unprompted and added `casa` — "house" in the everyday
+  sense, 2,368 tweets about anything at all — making the result look as though
+  the search had stopped filtering. Guessing at languages the user has not
+  asked for is worse than not guessing.
+- The suggested terms are not listed in the page. An earlier build showed them
+  as toggleable chips grouped by kind; it was more UI than the feature
+  warranted, and once the languages stopped being guessed at there was little
+  left to prune.
 - If Workers AI is unavailable or the daily allowance is spent, `/v1/expand`
   returns the term as typed with `degraded: true` and search continues as an
   ordinary keyword search. Search never depends on the model being up.

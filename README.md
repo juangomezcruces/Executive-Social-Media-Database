@@ -302,31 +302,37 @@ non-English leader: `climate` matches 2,103 tweets, while the same concept
 across languages matches 4,064.
 
 Ticking **Also search related terms** asks `/v1/expand` for three kinds of
-extra term, and shows them as three labelled rows of chips:
+extra term and searches for all of them:
 
-| row | what it holds | `housing` gives |
+| kind | what it holds | `housing` gives |
 | --- | --- | --- |
-| **Same meaning** | other ways of writing the term | homes |
-| **Related concepts** | the policy vocabulary around it — *not* rewordings | affordable housing, mortgage, rent, eviction, homelessness, property tax |
-| **Other languages** | the term and the main concepts as a native-speaking politician would write them | vivienda, alquiler, habitação |
+| synonyms | other ways of writing the term | homes |
+| related | the policy vocabulary around it — *not* rewordings | affordable housing, mortgage, rent, eviction, homelessness, property tax |
+| translations | the term and the main concepts as a native-speaking politician would write them | vivienda, alquiler, habitação |
 
-The related-concepts row is the one that earns its keep. Synonyms mostly find
-the tweets the term already found; the neighbouring concepts find the ones it
-missed, because a leader announcing housing policy is far more likely to write
-*mortgage* or *rent* than a second word for *housing*.
+The related concepts are what earn their keep. Synonyms mostly find the tweets
+the term already found; the neighbouring concepts find the ones it missed,
+because a leader announcing housing policy is far more likely to write
+*mortgage* or *rent* than a second word for *housing*. Searching `corruption`
+across the corpus goes from 398 tweets to 2,909 this way, and `corrupção`,
+`transparencia` and `lava jato` account for most of the difference.
 
-The languages come from whichever countries you have selected, and the
-country-to-language map is derived from the corpus itself, so Canada gives
-English and French, Belgium gives Dutch, English and French.
+**The languages follow the countries you have selected**, through a
+country-to-language map derived from the corpus itself: Canada gives English
+and French, Belgium gives Dutch, English and French. Select nothing and the
+suggestions stay in English, which is deliberate — an earlier version defaulted
+to all seven corpus languages and translated `housing` into Czech, Dutch and
+Italian nobody had asked for, pulling in `casa` and 2,368 tweets about
+everything and nothing.
 
-Every chip is a toggle and every row heading toggles its whole row, so a kind
-that is pulling the search somewhere you did not want goes in one click. The
-search runs over exactly the terms left on.
+The suggested terms are not shown in the page, but they are all in the request:
+`also=` on `/v1/tweets` carries them, so a result you cite can be reproduced
+exactly by anyone with the URL.
 
-The expansion is a **separate, visible step on purpose**. `/v1/tweets` stays a
+The expansion is a **separate, explicit step on purpose**. `/v1/tweets` stays a
 deterministic function of its parameters, so a figure you cite can be
 reproduced by anyone with the same URL: the terms are in it. Nothing is
-expanded behind your back.
+expanded unless you tick the box.
 
 ```bash
 curl "$API/v1/tweets?leader=modi,trudeau&q=climate&exclude_replies=true&limit=5"
