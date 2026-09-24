@@ -247,12 +247,20 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 
 /* --- charts ------------------------------------------------------------ */
 
+/* The monthly distribution runs the full width, and the two per-leader bar
+   charts sit side by side underneath it. They are the pair that gets compared
+   -- who tweets most against who is heard most -- so they belong on one row. */
 .charts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
 .chart-panel { margin-bottom: 0; }
+.chart-panel--wide { grid-column: 1 / -1; }
+
+@media (max-width: 760px) {
+  .charts { grid-template-columns: 1fr; }
+}
 .chart-box { position: relative; height: 300px; }
 
 /* --- tables ------------------------------------------------------------ */
