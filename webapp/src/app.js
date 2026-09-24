@@ -15,6 +15,7 @@ import {
   getManifest, getSummary, getLeaders,
   queryTweets, queryCount, queryAggregates, hasUnchartableFilter,
   runSql, downloadTable, getKey, setKey, hasKey,
+  getLanguages, expandTerm,
 } from './data.js';
 
 const PAGE_SIZE = 50;
@@ -116,6 +117,11 @@ const els = {
   end: document.getElementById('f-end'),
   engagement: document.getElementById('f-engagement'),
   search: document.getElementById('f-search'),
+  expand: document.getElementById('f-expand'),
+  terms: document.getElementById('terms'),
+  termsLead: document.getElementById('terms-lead'),
+  termsHint: document.getElementById('terms-hint'),
+  termsChips: document.getElementById('terms-chips'),
   stats: document.getElementById('stats'),
   scopeNote: document.getElementById('scope-note'),
   volNote: document.getElementById('vol-note'),
@@ -142,6 +148,7 @@ let sort = { column: 'created_at', direction: 'desc' };
 let leaderSelect = null;
 let countrySelect = null;
 let leaderName = new Map();
+let leaderCountry = new Map();
 let inFlight = null;
 /**
  * The last count, keyed by the filters that produced it. Counting is the one
@@ -150,6 +157,37 @@ let inFlight = null;
  * not once per view.
  */
 let lastCount = { signature: null, value: null };
+
+/**
+ * The three kinds of suggestion, in the order they are shown, with the labels
+ * the UI puts on them. `related` is the useful one -- not other words for the
+ * term but the vocabulary around it, which is what finds tweets the plain
+ * keyword misses.
+ */
+const TERM_GROUPS = [
+  ['synonyms', 'Same meaning'],
+  ['related', 'Related concepts'],
+  ['translations', 'Other languages'],
+];
+
+const noExpansion = () => ({
+  term: null,
+  langs: [],
+  terms: [],
+  groups: { synonyms: [], related: [], translations: [] },
+  off: new Set(),
+  degraded: false,
+  reason: '',
+});
+
+/**
+ * The current expansion: the term it was built for, every suggested term
+ * (flat, and again grouped by kind), and the ones the user has switched off.
+ * Held here rather than recomputed, because each expansion is a model call and
+ * the point is to make one.
+ */
+let expansion = noExpansion();
+let languageMap = { by_country: {}, default: [] };
 
 const num = new Intl.NumberFormat('en-US');
 const fmtDate = (value) => String(value ?? '').slice(0, 10);
@@ -189,6 +227,9 @@ function currentFilters() {
     endDate: els.end.value || null,
     minEngagement: els.engagement.value ? Number(els.engagement.value) : null,
     search: els.search.value.trim() || null,
+    // Only the terms still switched on, and never the original twice.
+    also: expansion.terms
+      .filter((t, i) => i > 0 && !expansion.off.has(t.toLowerCase())),
     // The checkbox now reads "Include replies" and is off by default:
     // broadcast is the honest baseline, since a leader who runs an
     // @-reply account otherwise swamps every volume comparison.
@@ -433,6 +474,106 @@ function describeSelection({ leaders, countries, excludeReplies }, totals) {
   return parts.join(' · ');
 }
 
+/**
+ * Which languages to translate into: the ones actually used by the countries
+ * on screen. Selected countries win; failing that, the countries of the
+ * selected leaders; failing that, the languages that cover most of the corpus.
+ */
+function targetLanguages() {
+  const countries = countrySelect ? countrySelect.value : [];
+  const fromLeaders = (leaderSelect ? leaderSelect.value : [])
+    .map((id) => leaderCountry.get(id))
+    .filter(Boolean);
+  const chosen = countries.length ? countries : fromLeaders;
+  if (!chosen.length) return languageMap.default;
+  const langs = new Set();
+  for (const country of chosen) {
+    for (const lang of languageMap.by_country[country] || []) langs.add(lang);
+  }
+  return [...langs].slice(0, 8);
+}
+
+const termOn = (term) => !expansion.off.has(term.toLowerCase());
+
+const chip = (term, extra = '') =>
+  `<button type="button" class="chip${extra}" aria-pressed="${termOn(term)}"
+    data-term="${escapeHtml(term)}">${escapeHtml(term)}</button>`;
+
+function renderTerms() {
+  if (expansion.terms.length <= 1) {
+    els.terms.hidden = !expansion.degraded;
+    if (expansion.degraded) {
+      els.termsLead.textContent = 'Searched as typed';
+      els.termsHint.textContent = expansion.reason || '';
+      els.termsChips.innerHTML = '';
+    }
+    return;
+  }
+  els.terms.hidden = false;
+  els.termsLead.textContent = 'Searching for';
+  const active = expansion.terms.filter(termOn).length;
+  els.termsHint.textContent =
+    `${active} of ${expansion.terms.length} terms`
+    + (expansion.langs.length ? ` · ${expansion.langs.join(', ')}` : '')
+    + ' · click a term to drop it, or a heading to drop the group';
+
+  // The term as typed stands on its own; everything else is filed under the
+  // kind of suggestion it is, so a whole kind can go in one click when it is
+  // pulling the search somewhere the user did not want to go.
+  const rows = [`<div class="terms-group">
+      <span class="group-label">Your term</span>
+      ${chip(expansion.terms[0], ' chip--original')}
+    </div>`];
+
+  for (const [key, label] of TERM_GROUPS) {
+    const terms = expansion.groups[key] || [];
+    if (!terms.length) continue;
+    const anyOn = terms.some(termOn);
+    rows.push(`<div class="terms-group">
+      <button type="button" class="group-label group-label--toggle"
+        aria-pressed="${anyOn}" data-group="${key}"
+        title="${anyOn ? 'Drop' : 'Restore'} all ${terms.length}">${label}</button>
+      ${terms.map((t) => chip(t)).join('')}
+    </div>`);
+  }
+  els.termsChips.innerHTML = rows.join('');
+}
+
+/** Fetch an expansion for the current term, unless we already have that one. */
+async function ensureExpansion() {
+  const term = els.search.value.trim();
+  const langs = targetLanguages();
+  if (!els.expand.checked || !term) {
+    expansion = noExpansion();
+    els.terms.hidden = true;
+    return;
+  }
+  const same = expansion.term === term
+    && expansion.langs.join(',') === langs.join(',');
+  if (same) return;
+
+  els.terms.hidden = false;
+  els.termsLead.textContent = 'Looking for related terms…';
+  els.termsHint.textContent = '';
+  els.termsChips.innerHTML = '';
+
+  const result = await expandTerm(term, langs);
+  const terms = result.terms || [term];
+  expansion = {
+    ...noExpansion(),
+    term,
+    langs: result.langs || langs,
+    terms,
+    // An older Worker sends a flat list and no groups. Filing the lot under
+    // "related" is honest -- it is what the endpoint mostly returns and we
+    // cannot tell the kinds apart from here.
+    groups: result.groups || { synonyms: [], related: terms.slice(1), translations: [] },
+    degraded: Boolean(result.degraded),
+    reason: result.reason || '',
+  };
+  renderTerms();
+}
+
 async function refresh({ resetPage = true, chartsToo = true } = {}) {
   if (resetPage) page = 0;
   const filters = currentFilters();
@@ -552,10 +693,47 @@ function bindEvents() {
   leaderSelect = createMultiSelect(els.leader, () => {});
   countrySelect = createMultiSelect(els.country, () => {});
 
-  els.form.addEventListener('submit', (event) => { event.preventDefault(); refresh(); });
+  els.form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await ensureExpansion();
+    refresh();
+  });
+
+  // Switching expansion off should take effect immediately, not on the next
+  // Apply: it changes what the numbers on screen mean.
+  els.expand.addEventListener('change', async () => {
+    await ensureExpansion();
+    refresh();
+  });
+
+  // Each term is a toggle, and each heading toggles its whole group. Dropping
+  // terms re-runs the table but not the charts, which cannot see text filters
+  // anyway.
+  els.termsChips.addEventListener('click', (event) => {
+    const heading = event.target.closest('.group-label--toggle');
+    if (heading) {
+      const terms = expansion.groups[heading.dataset.group] || [];
+      // Any still on means the click is "drop the group"; none on means
+      // "bring it back".
+      const dropping = terms.some(termOn);
+      for (const term of terms) {
+        if (dropping) expansion.off.add(term.toLowerCase());
+        else expansion.off.delete(term.toLowerCase());
+      }
+    } else {
+      const pressed = event.target.closest('.chip');
+      if (!pressed) return;
+      const term = pressed.dataset.term.toLowerCase();
+      if (expansion.off.has(term)) expansion.off.delete(term); else expansion.off.add(term);
+    }
+    renderTerms();
+    refresh({ resetPage: true, chartsToo: false });
+  });
   els.form.addEventListener('reset', () => {
     leaderSelect.clear();
     countrySelect.clear();
+    expansion = noExpansion();
+    els.terms.hidden = true;
     // Native reset restores the checkbox to unchecked, which is now "replies
     // excluded" -- the default we want.
     sort = { column: 'created_at', direction: 'desc' };
@@ -630,9 +808,13 @@ async function main() {
   paintKeyState();
   els.releaseMeta.textContent = 'Loading…';
   try {
-    const [manifest, summary, leaders] = await Promise.all([
+    const [manifest, summary, leaders, languages] = await Promise.all([
       getManifest(), getSummary(), getLeaders(),
+      // A missing language map only costs the expansion its targeting, so it
+      // must not take the whole page down with it.
+      getLanguages().catch(() => ({ by_country: {}, default: [] })),
     ]);
+    languageMap = languages;
 
     els.releaseMeta.textContent =
       `Release ${manifest.version} · ${num.format(summary.tweets)} tweets · `
@@ -647,6 +829,7 @@ async function main() {
       + `${summary.first_date.slice(0, 4)}–${summary.last_date.slice(0, 4)}`;
 
     leaderName = new Map(leaders.map((l) => [l.leader_id, l.name]));
+    leaderCountry = new Map(leaders.map((l) => [l.leader_id, l.country]));
     for (const input of [els.start, els.end]) {
       input.min = summary.first_date;
       input.max = summary.last_date;

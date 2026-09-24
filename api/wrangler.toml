@@ -24,5 +24,13 @@ TURSO_URL = "libsql://esmd-juangocr.aws-eu-west-1.turso.io"
 binding = "BUCKET"
 bucket_name = "esmd-data"
 
+# Workers AI, used only by /v1/expand to suggest related search terms.
+# The free plan includes 10,000 neurons a day; one expansion costs about
+# fifty, and every result is cached in R2, so a repeated term costs nothing. If the
+# allowance ever runs out the endpoint degrades to returning the term as typed
+# and search carries on.
+[ai]
+binding = "AI"
+
 [observability]
 enabled = true

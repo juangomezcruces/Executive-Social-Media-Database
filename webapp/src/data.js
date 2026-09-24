@@ -144,6 +144,27 @@ export const getLeaders = () =>
 /** Monthly totals per leader. The source for every number the API never sees. */
 export const getVolume = () => cached('volume', () => api('/volume'));
 
+/** Which languages each country actually tweets in, and the fallback set. */
+export const getLanguages = () => cached('languages', () => api('/languages'));
+
+/**
+ * Ask for related search terms, in the languages given.
+ *
+ * Never throws for the caller's purposes: the endpoint answers with the
+ * original term and `degraded: true` if the model is unavailable, and a
+ * network failure is turned into the same shape here, so a search is never
+ * blocked by the expansion failing.
+ */
+export async function expandTerm(term, langs = []) {
+  const params = new URLSearchParams({ q: term });
+  if (langs.length) params.set('langs', langs.join(','));
+  try {
+    return await api(`/expand?${params}`);
+  } catch (error) {
+    return { term, langs, terms: [term], degraded: true, reason: error.message };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // row-level queries
 // ---------------------------------------------------------------------------
@@ -152,7 +173,7 @@ export const getVolume = () => cached('volume', () => api('/volume'));
 function toParams(filters = {}) {
   const {
     leaders = [], countries = [], startDate, endDate,
-    minEngagement, search, excludeReplies,
+    minEngagement, search, also = [], excludeReplies,
   } = filters;
   const params = new URLSearchParams();
   if (leaders.length) params.set('leader', leaders.join(','));
@@ -161,6 +182,7 @@ function toParams(filters = {}) {
   if (endDate) params.set('end', endDate);
   if (minEngagement) params.set('min_engagement', String(Math.trunc(minEngagement)));
   if (search) params.set('q', search);
+  if (also.length) params.set('also', also.join(','));
   if (excludeReplies) params.set('exclude_replies', 'true');
   return params;
 }

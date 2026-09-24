@@ -6,6 +6,62 @@ change — no downstream version bump is needed.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v2.1.0] — 2026-09-24
+
+Search across languages. No data changed; the release the API serves is still
+v2.0.0.
+
+### Added
+
+- **Related-term search.** Tick *Also search related terms* and the search box
+  offers three kinds of extra term: other ways of writing it, the concepts
+  around it, and the same subject in the languages of the countries you have
+  selected. The middle one is the point — `housing` brings *affordable
+  housing*, *mortgage*, *rent*, *eviction*, *homelessness*, not a second word
+  for *housing*, because a synonym mostly finds the tweets the term already
+  found. On this corpus the languages are not a nicety either: 71% of the
+  tweets are not in English, so `climate` alone matches 2,103 rows where the
+  same concept across languages matches 4,064. In the web app the same query
+  went from 1,639 rows to 2,997.
+- **`GET /v1/expand`** — suggests the terms. It returns a flat `terms` array,
+  which is what `also=` takes, and the same words again under `groups` as
+  `synonyms`, `related` and `translations`, which is what the chips are
+  labelled from. One Workers AI call, cached in R2 by term and language set, so
+  a repeated search costs nothing. About fifty neurons a call against a free
+  allowance of 10,000 a day, so ~200 fresh terms daily before the cache starts
+  absorbing them. The model is held to a JSON schema, because asked politely
+  for JSON it returned prose; the call falls back to an unconstrained one if a
+  future model rejects the schema, and the parser copes with prose either way —
+  anything that arrives ungrouped is filed under `related`, which is honest
+  rather than guessed.
+- **`GET /v1/languages`** and `public/languages.json` — which languages each
+  country actually tweets in, at or above a 5% share, derived from the corpus
+  rather than hardcoded. It gets Canada (en, fr), Belgium (nl, en, fr) and
+  Switzerland (fr, de, en, it) right, and stays right as leaders are added.
+- **`also=` on `/v1/tweets` and `/v1/count`** — extra terms, OR-ed into the
+  full-text query, each matched as a quoted phrase so a term cannot alter the
+  shape of the query.
+
+### Fixed
+
+- **`/v1/count` ignored the text search.** It built its WHERE clause from the
+  structural filters only and never went through the full-text index, so the
+  results header read "10,000+" no matter what you typed — a count of a
+  different query from the one on screen. It now takes the same path as the
+  rows it is counting.
+
+### Notes
+
+- The expansion is deliberately a separate step the user can see and edit
+  rather than something applied silently. `/v1/tweets` remains a deterministic
+  function of its parameters, so a cited result stays reproducible: the terms
+  are in the URL. Broadening from synonyms to neighbouring concepts costs
+  precision, which is exactly why the suggestions are grouped and every group
+  can be dropped in one click.
+- If Workers AI is unavailable or the daily allowance is spent, `/v1/expand`
+  returns the term as typed with `degraded: true` and search continues as an
+  ordinary keyword search. Search never depends on the model being up.
+
 ## [v2.0.1] — 2026-09-23
 
 Site only. No data changed, and the release the API serves is still v2.0.0.

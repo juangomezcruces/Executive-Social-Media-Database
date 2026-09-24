@@ -80,6 +80,10 @@
       <div class="field field--grow">
         <label for="f-search">Text contains</label>
         <input type="search" id="f-search" placeholder="e.g. climate" autocomplete="off">
+        <label class="check check--tight">
+          <input type="checkbox" id="f-expand">
+          <span>Also search related terms</span>
+        </label>
       </div>
       <div class="field field--check">
         <label class="check">
@@ -96,6 +100,14 @@
       </div>
     </form>
   </section>
+
+  <div class="terms" id="terms" hidden>
+    <p class="terms-head">
+      <span id="terms-lead">Searching for</span>
+      <span class="terms-hint" id="terms-hint"></span>
+    </p>
+    <div class="terms-chips" id="terms-chips"></div>
+  </div>
 
   <p class="note" id="scope-note" hidden>
     Text search and minimum engagement filter the results table only. The

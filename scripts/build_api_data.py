@@ -9,6 +9,7 @@ Produces, under ``--out``:
 ``public/summary.json``     precomputed totals
 ``public/volume.json``      monthly volume and engagement per leader
 ``public/engagement.json``  mean engagement per leader
+``public/languages.json``   which languages each country tweets in
 ``public/manifest.json``    the release pointer
 
 Two decisions are worth knowing about.
@@ -269,6 +270,33 @@ def main() -> None:
     # Compact, not pretty-printed: every visitor downloads this file.
     (public / "volume.json").write_text(
         json.dumps(monthly.to_dict(orient="records"), separators=(",", ":")))
+
+    # Which languages each country actually tweets in, so the search can
+    # translate a term into the languages of the countries you selected rather
+    # than into all fourteen. Derived from the corpus, not hardcoded: it gets
+    # Canada (en, fr), Belgium (nl, en, fr) and Switzerland (fr, de, en, it)
+    # right, and stays right when leaders are added.
+    IGNORED_LANGS = {"zxx", "und", "qme", "qam", "qht", "art"}
+    langs = tweets[tweets["lang"].notna() & ~tweets["lang"].isin(IGNORED_LANGS)]
+    languages = {}
+    for country, group in langs.groupby("country"):
+        share = group["lang"].value_counts(normalize=True)
+        languages[country] = [lang for lang, part in share.items() if part >= 0.05]
+    # The fallback when nothing is selected: the languages that cover most of
+    # the corpus, biggest first.
+    overall = langs["lang"].value_counts(normalize=True)
+    default = []
+    running = 0.0
+    for lang, part in overall.items():
+        default.append(lang)
+        running += part
+        if running >= 0.9 or len(default) >= 8:
+            break
+    (public / "languages.json").write_text(json.dumps(
+        {"by_country": languages, "default": default}, indent=1, ensure_ascii=False))
+    print(f"  languages {len(languages)} countries, "
+          f"{len({l for v in languages.values() for l in v})} languages, "
+          f"default {','.join(default)}")
 
     summary = {
         "version": manifest["version"],

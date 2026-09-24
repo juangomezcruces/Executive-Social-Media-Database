@@ -77,7 +77,8 @@ data/{tweets,leaders,sentiment}.{parquet,csv}   the tables
 data/manifest.json                              the release pointer
 api/build/esmd.db                               285 MB — the whole database
 api/build/esmd.sql                              155 MB — the same, as a dump
-api/build/public/*.json                         summary, volume, engagement, manifest
+api/build/public/*.json                         summary, volume, engagement,
+                                                manifest, languages
 ```
 
 `build_api_data.py` refuses to finish if the row counts or the search index
@@ -135,7 +136,7 @@ done
 
 # The precomputed aggregates. public/ is served to everyone, and is the reason
 # the charts cost zero database rows.
-for f in summary volume engagement manifest; do
+for f in summary volume engagement manifest languages; do
   npx wrangler r2 object put "esmd-data/public/$f.json" --remote \
     --file="api/build/public/$f.json" --content-type=application/json
 done
@@ -173,6 +174,16 @@ curl -s "https://esmd-api.<subdomain>.workers.dev/v1/tweets?limit=5000" | head -
 
 The last one must come back with 100 rows and `"capped": 100`. If it returns
 5,000, stop: the cap is the whole design and something is wrong.
+
+### Workers AI
+
+`/v1/expand` uses Workers AI, which needs no setup beyond the `[ai]` binding
+already in `wrangler.toml` — no key, no separate account. The free plan
+includes 10,000 neurons a day and one expansion costs about fifty, so
+roughly 200 fresh terms a day before caching, and a repeated term costs nothing
+because the answer is kept in R2. If the allowance is ever spent the endpoint
+returns the term as typed with `degraded: true`, and search carries on as an
+ordinary keyword search.
 
 ## 5. Point the three clients at it
 

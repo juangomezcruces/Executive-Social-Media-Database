@@ -282,15 +282,51 @@ Base: `https://esmd-api.<subdomain>.workers.dev/v1` — the current address is i
 | `GET /v1/leaders` | all 62 leaders with their totals | no |
 | `GET /v1/tweets` | filtered, sorted tweets — **max 100 rows** | no |
 | `GET /v1/count` | how many rows match, ceilinged at 10,000 | no |
-| `GET /v1/summary` `volume` `engagement` | precomputed aggregates | no |
+| `GET /v1/summary` `volume` `engagement` `languages` | precomputed aggregates | no |
+| `GET /v1/expand` | related concepts around a term, and the term in the languages you name | no |
 | `GET /v1/manifest` | the current release | no |
 | `GET /v1/download/{table}.{parquet\|csv}` | the whole table | **yes** |
 | `POST /v1/sql` | read-only `SELECT`, max 1,000 rows | **yes** |
 
 `/v1/tweets` takes `leader`, `country` (both comma-separated for several),
-`start`, `end`, `min_engagement`, `q` (full-text), `exclude_replies`,
-`exclude_deleted`, `sort`, `direction`, `limit` and `offset`. Send a key as
-`Authorization: Bearer esmd_...`.
+`start`, `end`, `min_engagement`, `q` (full-text), `also` (extra terms OR-ed
+into the search), `exclude_replies`, `exclude_deleted`, `sort`, `direction`,
+`limit` and `offset`. Send a key as `Authorization: Bearer esmd_...`.
+
+### Searching across languages
+
+71% of this corpus is not in English — Spanish 112,963 tweets, Portuguese
+54,080, Czech 25,048, French 22,932, Italian 22,018, and sixteen languages with
+over a thousand each. A plain keyword search therefore under-reports every
+non-English leader: `climate` matches 2,103 tweets, while the same concept
+across languages matches 4,064.
+
+Ticking **Also search related terms** asks `/v1/expand` for three kinds of
+extra term, and shows them as three labelled rows of chips:
+
+| row | what it holds | `housing` gives |
+| --- | --- | --- |
+| **Same meaning** | other ways of writing the term | homes |
+| **Related concepts** | the policy vocabulary around it — *not* rewordings | affordable housing, mortgage, rent, eviction, homelessness, property tax |
+| **Other languages** | the term and the main concepts as a native-speaking politician would write them | vivienda, alquiler, habitação |
+
+The related-concepts row is the one that earns its keep. Synonyms mostly find
+the tweets the term already found; the neighbouring concepts find the ones it
+missed, because a leader announcing housing policy is far more likely to write
+*mortgage* or *rent* than a second word for *housing*.
+
+The languages come from whichever countries you have selected, and the
+country-to-language map is derived from the corpus itself, so Canada gives
+English and French, Belgium gives Dutch, English and French.
+
+Every chip is a toggle and every row heading toggles its whole row, so a kind
+that is pulling the search somewhere you did not want goes in one click. The
+search runs over exactly the terms left on.
+
+The expansion is a **separate, visible step on purpose**. `/v1/tweets` stays a
+deterministic function of its parameters, so a figure you cite can be
+reproduced by anyone with the same URL: the terms are in it. Nothing is
+expanded behind your back.
 
 ```bash
 curl "$API/v1/tweets?leader=modi,trudeau&q=climate&exclude_replies=true&limit=5"
